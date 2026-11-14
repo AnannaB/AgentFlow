@@ -5,7 +5,7 @@
 - Python 3.13
 - Git
 - Windows PowerShell on Windows; the package itself uses cross-platform Python APIs
-- Ollama and a locally available model for future inference features. Ollama is not required to run Phase 0 checks.
+- Ollama and a locally available model for future inference features. Ollama is not required for the current domain, persistence, or test workflows.
 
 ## Create a development environment
 
@@ -44,7 +44,7 @@ Do not commit `.env`, credentials, model data, or local databases. `.gitignore` 
 
 ## Prepare Ollama (when needed)
 
-Install Ollama using its official distribution, start the local service, and download a model supported by your machine. Set the model name and local base URL in `.env`. Phase 0 only validates configuration; connection diagnostics are planned for a later phase.
+Install Ollama using its official distribution, start the local service, and download a model supported by your machine. Set the model name and local base URL in `.env`. AgentFlow does not connect to Ollama yet; planner integration and connection diagnostics are planned for later phases.
 
 ## Run development checks
 

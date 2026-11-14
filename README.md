@@ -2,13 +2,13 @@
 
 AgentFlow is a local-first agentic workflow orchestration platform. Users will describe an objective in natural language; AgentFlow will plan and execute validated workflows using registered tools, with local Ollama inference and a rule-based fallback.
 
-> **Current status:** Phase 0 project foundation. The agent engine, database, workflow UI, templates, replay, and analytics are not implemented yet.
+> **Current status:** Phase 1 domain and SQLite persistence are implemented. Planning, execution, the tool registry, and dashboard are not implemented yet.
 
 ## Requirements
 
 - Python 3.13
 - Git
-- Ollama for local model inference (optional during Phase 0 setup)
+- Ollama for local model inference (not required until Ollama planning is implemented)
 
 ## Install and configure
 
@@ -34,7 +34,22 @@ python -m ruff format --check .
 
 ## Architecture and roadmap
 
-See [Architecture](docs/architecture.md) for component boundaries, data flow, proposed persistence model, security controls, and phased delivery. The roadmap is incremental; no workflow execution functionality is included in Phase 0.
+See [Architecture](docs/architecture.md) for component boundaries, data flow, the Phase 1 persistence model, security controls, and phased delivery. The roadmap is incremental; workflow execution is not implemented yet.
+
+Initialize the Phase 1 database and create a first run from Python:
+
+```python
+from agentflow.domain.models import WorkflowRun
+from agentflow.storage.sqlite import SQLiteDatabase, SQLiteRepository
+
+database = SQLiteDatabase("data/agentflow.sqlite3")
+database.initialize()
+repository = SQLiteRepository(database)
+run = repository.create_run(WorkflowRun(objective="Review a local report"))
+print(run.id)
+```
+
+Repository operations use short-lived connections. Use `with repository.transaction():` to group multiple repository writes atomically.
 
 ## Local-first and safety principles
 

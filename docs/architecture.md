@@ -58,9 +58,9 @@ Each explicit registration includes name/version, description, strict Pydantic i
 
 Policy can require plan-level or step-level approval. The dashboard displays exact objective, step graph, tool names, validated arguments, risks, and expected effects. Decisions bind to a plan/argument digest; any mutation invalidates approval. Rejection is persisted and causes a visible paused or terminal outcome. The initial local single-user workflow is not an identity system; multi-user deployment requires separate authorization design.
 
-## SQLite schema (planned)
+## SQLite schema (Phase 1)
 
-All schema changes use ordered explicit migrations. Enable foreign keys. Persist timestamps as UTC ISO-8601 text. JSON payloads are size-limited and validated before storage.
+The first schema is implemented in `src/agentflow/storage/migrations/0001_initial.sql` and applied by `SQLiteDatabase.initialize()`. Future schema changes must use a new ordered migration. Connections enable foreign keys and a busy timeout, are scoped to each operation, and are always closed. Write transactions use `BEGIN IMMEDIATE`; repository state changes and their events commit or roll back together. Timestamps are stored as fixed precision UTC ISO-8601 text. JSON payloads are validated as Pydantic models; tool arguments/results are limited to 64 KiB, event details to 16 KiB, and non-finite numbers and credential-like event keys are rejected.
 
 ### `workflow_runs`
 
@@ -76,21 +76,23 @@ All schema changes use ordered explicit migrations. Enable foreign keys. Persist
 
 ### `workflow_templates`
 
-`id` UUID; `name`; `description`; validated `template_json`; `created_at`, `updated_at`; optional `archived_at` or `is_active`. Templates support safe variables and tool references; no credentials or run data. Template changes are versioned or copied into a run snapshot so later edits do not mutate history.
+`id` UUID; unique case-insensitive `name`; `description`; validated `plan_json`; `version`; `created_at`, `updated_at`; optional `archived_at`. Templates contain no credentials or run data. Template changes are versioned or copied into a run snapshot so later edits do not mutate history.
 
 ### `approval_requests`
 
-`id`; `run_id` FK; optional `step_id` FK; `status`; requested/resolved timestamps; `decision_note`; `plan_digest`.
+`id`; `run_id` FK; optional `step_id`; `status`; requested/resolved timestamps; `decision_note`; `plan_digest`. A composite foreign key ensures a step-level approval points to a step from the same run; deleting that step removes its approval request.
 
 ### `run_events`
 
 `id`; `run_id` FK; `occurred_at`; `event_type`; bounded sanitized `details_json`. Useful for audit display, not a substitute for current state columns.
 
-Index history by `(created_at, id)` and status/date as analytics needs become clear. Every execution-history query requires a limit and stable cursor/page ordering. Compute analytics over explicit date windows and bounded aggregates.
+The initial migration indexes run history by `(created_at, id)` and status/date, plus run-step, step-attempt, approval, event, and template lookup paths. `list_runs()` uses a bounded page size and stable `(created_at, id)` ordering. Child-list operations also impose limits. Analytics over explicit date windows and bounded aggregates remains a later phase.
 
 ## Pydantic contracts
 
-Use strict models with `extra="forbid"`, bounded fields/lists, and safe defaults (`Field(default_factory=list/dict)`). Core contracts include `PlanStep`, `ExecutionPlan`, `RunRequest`, `ToolResult`, `ApprovalDecision`, `WorkflowTemplate`, `StepExecutionRecord`, and report/analytics query models. Each registered tool owns its input and output model. Persisted JSON is revalidated when loaded.
+Phase 1 implements strict frozen models with `extra="forbid"`, bounded fields/lists, timezone-aware UTC timestamps, and safe defaults (`Field(default_factory=list/dict)`). Implemented contracts include `WorkflowRun`, `WorkflowStep`, `StepAttempt`, `ApprovalRequest`, `RunEvent`, `WorkflowTemplate`, `PlanStep`, `ExecutionPlan`, and `ToolResult`. Plan validation rejects duplicate step keys, invalid dependency references, and dependency cycles. Because Pydantic freezing is shallow, repository writes revalidate a JSON snapshot so in-place mutations of nested payloads cannot bypass validation. Persisted JSON is also revalidated when loaded. `RunRequest`, `ApprovalDecision`, tool-specific schemas, and report/analytics query models remain for their later phases.
+
+`SQLiteRepository` provides CRUD for all six persisted entities. `transaction()` groups repository calls on one connection. Run/step state changes go through `transition_run()` / `transition_step()`; direct updates cannot change lifecycle state. A transition and its corresponding `RunEvent` are written in the same transaction.
 
 ## Configuration, diagnostics, and logging
 
@@ -117,13 +119,13 @@ Unit tests cover schemas, defaults, transitions, dependency graphs, digest inval
 
 ## Roadmap
 
-### Phase 0 — foundation (current)
+### Phase 0 — foundation (completed)
 
 Package metadata/dependencies, validated settings, structured redacting logger, pytest/Ruff config, GitHub Actions, `.gitignore`, `.env.example`, README, and setup/architecture docs. No engine, tools, database business logic, or dashboard.
 
-### Phase 1 — domain and persistence
+### Phase 1 — domain and persistence (implemented; review pending)
 
-Create domain contracts/state machine and explicit SQLite migrations/repositories. Add transaction and bounded history query tests. Proposed files: `domain/models.py`, `states.py`, `errors.py`, `storage/protocols.py`, `storage/sqlite.py`, `storage/migrations/`, unit/integration tests.
+Domain contracts/state machine, initial SQLite migration/repository, transactional state changes, and unit/integration tests are implemented. The LLM, tool registry, application services, and dashboard remain out of scope. Files: `domain/models.py`, `states.py`, `transitions.py`, `errors.py`, `storage/protocols.py`, `storage/sqlite.py`, `storage/migrations/`, and corresponding tests.
 
 ### Phase 2 — registry, templates, and rule planning
 
