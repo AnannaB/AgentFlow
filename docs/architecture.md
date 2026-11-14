@@ -123,30 +123,40 @@ Unit tests cover schemas, defaults, transitions, dependency graphs, digest inval
 
 Package metadata/dependencies, validated settings, structured redacting logger, pytest/Ruff config, GitHub Actions, `.gitignore`, `.env.example`, README, and setup/architecture docs. No engine, tools, database business logic, or dashboard.
 
-### Phase 1 — domain and persistence (implemented; review pending)
+### Phase 1 — domain and persistence (completed)
 
 Domain contracts/state machine, initial SQLite migration/repository, transactional state changes, and unit/integration tests are implemented. The LLM, tool registry, application services, and dashboard remain out of scope. Files: `domain/models.py`, `states.py`, `transitions.py`, `errors.py`, `storage/protocols.py`, `storage/sqlite.py`, `storage/migrations/`, and corresponding tests.
 
-### Phase 2 — registry, templates, and rule planning
+### Phase 2 — tool registry (current)
 
-Implement typed tool registry, first useful tools, template CRUD/version snapshots, rule planner, and plan validation. Test template safety and plan constraints. Proposed files: `tools/`, `planning/rule_planner.py`, `planning/plan_validator.py`, template application service and tests.
+Implement a typed, versioned tool registry and deterministic built-ins. This phase does not include workflow planning, templates, or execution. The registry validates Pydantic inputs and outputs, enforces metadata-based approval, bounded concurrency, timeouts, JSON serializability, and tool version selection. Discovery returns metadata and schemas only. File tools require explicit existing workspace roots and enforce byte, row, column, and group limits. Registered implementations are trusted application code; model output can only select a registered name and validated data, never executable code.
 
-### Phase 3 — execution and recovery
+Built-ins are `calculator`, `date_difference`, `date_calculate`, `csv_profiler`, `missing_value_analyzer`, `duplicate_detector`, `outlier_detector`, `data_aggregator`, `json_exporter`, and `markdown_report_generator`. See README and setup docs for supported operations. JSON exporter is medium risk, requires an explicit approval context, writes within a configured workspace via atomic replacement, and is not retryable/idempotent. Other built-ins are deterministic and idempotent.
+
+Timeouts bound registry wait time and signal cooperative cancellation. Python cannot safely kill a synchronous worker; registry concurrency remains occupied until a timed-out callable exits. Future custom tools must use bounded operations and checkpoints. No arbitrary generated code, shell, or SQL is accepted.
+
+The registry reports failures with typed, sanitized `ToolError` subclasses and does not log raw inputs or outputs. Persistent attempt/error history belongs to the Phase 4 execution service; Phase 2 does not write run events or attempt records.
+
+### Phase 3 — planning and templates
+
+Implement deterministic rule planning and plan validation, then workflow template CRUD/version snapshots. Templates are validated plan data, not executable code. Test intent recognition, constraints, and safe template reuse. Proposed files: `planning/rule_planner.py`, `planning/plan_validator.py`, template application service and tests.
+
+### Phase 4 — execution and recovery
 
 Implement workflow service, sequential dependency executor, transactional transitions, attempt history, cancellation and bounded retry/recovery. Add safe replay-as-new-run semantics and tests. Proposed files: `application/workflow_service.py`, `execution/`, repository updates and tests.
 
-### Phase 4 — Ollama and diagnostics
+### Phase 5 — Ollama and diagnostics
 
 Implement local Ollama adapter, timeout handling, model/connection diagnostics, and configurable fallback. Mock HTTP tests plus opt-in local smoke test. Proposed file: `planning/ollama_planner.py`, diagnostics service, config and docs updates.
 
-### Phase 5 — approvals, history, analytics, reporting
+### Phase 6 — approvals, history, analytics, reporting
 
 Implement approval workflow, paginated history/replay inspection, validated retry/replay actions, bounded analytics and reports. Test pagination, metrics, digest checks, and side-effect safeguards. Proposed files: `application/approval_service.py`, `history_service.py`, `analytics_service.py`, `report_service.py`, tests.
 
-### Phase 6 — Streamlit dashboard
+### Phase 7 — Streamlit dashboard
 
 Build professional dashboard with workflow graph, dependencies, state/progress, templates, run history, approval, analytics, diagnostics, loading/empty/error states, and input validation. Proposed files: `ui/app.py`, `ui/pages/`, UI/service acceptance tests; use existing Plotly dependency for the graph/metrics where appropriate.
 
-### Phase 7 — packaging and operational hardening
+### Phase 8 — packaging and operational hardening
 
 Add Docker packaging, operational docs, CI hardening, Windows/Docker path verification, security review, and end-to-end regression coverage. Proposed files: `Dockerfile`, compose configuration if useful, `docs/operations.md`, CI updates and tests.

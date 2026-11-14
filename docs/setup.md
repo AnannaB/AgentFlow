@@ -56,3 +56,34 @@ python -m ruff format --check .
 
 The test suite does not require a live Ollama service. The CI workflow installs the package and development extras on Windows and Ubuntu, then runs pytest and Ruff.
 
+## Use the Phase 2 tool registry
+
+```python
+from pathlib import Path
+
+from agentflow.tools.builtins import create_builtin_registry
+from agentflow.tools.context import ToolExecutionContext
+
+registry = create_builtin_registry()
+context = ToolExecutionContext(workspace_roots=(Path("./workspace"),))
+result = registry.invoke("calculator", {"expression": "(12 + 8) / 4"}, context=context)
+print(result.result)
+```
+
+Create workspace directories before adding them to a context. CSV tools accept a path under one of those roots. JSON exporter additionally requires `ToolExecutionContext(..., approved=True)` and a `.json` destination; approval is an explicit gate at this phase, not yet a user approval workflow. Never set the flag based only on model output.
+
+The registered tool interface consists of `ToolMetadata`, strict `ToolInput` and `ToolOutput` models, and a Python handler receiving validated input plus `ToolExecutionContext`. Register with `ToolRegistry.register(ToolDefinition(...))`. Exact name/version duplicates are rejected; versions coexist and discovery selects the latest semantic version unless all are requested. Pin invocation with `version=`. Errors are typed under `ToolError`; input values, outputs, and CSVs are bounded. Timeout is a caller wait bound plus cooperative cancellation, not forced termination of arbitrary Python.
+
+Available tools:
+
+- `calculator`: basic `+`, `-`, `*`, `/`, `//`, `%`, `**`, and unary signs through an arithmetic AST allowlist; function calls and names are rejected.
+- `date_difference`: difference in days between ISO dates.
+- `date_calculate`: add or subtract a bounded number of days.
+- `csv_profiler`: shape, names, inferred types, missing counts, and basic numeric/categorical statistics.
+- `missing_value_analyzer`: per-column and overall missing counts and rates.
+- `duplicate_detector`: duplicate count and bounded row indices, optionally based on a configured subset.
+- `outlier_detector`: per-numeric-column IQR bounds, counts, and bounded indices.
+- `data_aggregator`: group by one or more columns and compute sum, mean, count, min, or max with explicit aliases.
+- `json_exporter`: strict JSON export with atomic replace, SHA-256, path confinement, and approval requirement.
+- `markdown_report_generator`: escaped Markdown from validated summaries and findings.
+

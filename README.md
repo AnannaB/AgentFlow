@@ -2,7 +2,7 @@
 
 AgentFlow is a local-first agentic workflow orchestration platform. Users will describe an objective in natural language; AgentFlow will plan and execute validated workflows using registered tools, with local Ollama inference and a rule-based fallback.
 
-> **Current status:** Phase 1 domain and SQLite persistence are implemented. Planning, execution, the tool registry, and dashboard are not implemented yet.
+> **Current status:** Phase 1 domain and SQLite persistence and Phase 2 tool registry are implemented. Planning, workflow execution, and dashboard are not implemented yet.
 
 ## Requirements
 
@@ -50,6 +50,16 @@ print(run.id)
 ```
 
 Repository operations use short-lived connections. Use `with repository.transaction():` to group multiple repository writes atomically.
+
+## Phase 2 tool registry
+
+Tools are explicitly registered Python callables with a unique name and semantic version, description, strict Pydantic input and output models, risk, timeout, retry, and idempotency metadata. `ToolRegistry.invoke()` validates inputs, enforces approval and bounded concurrency, invokes only the registered callable, then validates and bounds JSON output. Discovery exposes schemas and metadata, never the callable. No model-generated Python, shell, SQL, or other code is executed.
+
+Create a registry with `create_builtin_registry()` from `agentflow.tools.builtins`. Provide `ToolExecutionContext` with explicitly configured existing workspace roots for file tools. JSON export also requires `approved=True`; future workflow services must provide an actual verified approval decision.
+
+Built-ins: `calculator` supports bounded basic arithmetic; `date_difference` and `date_calculate` provide date arithmetic; `csv_profiler` reports dataset shape, columns, missing values, types, and basic statistics; `missing_value_analyzer` reports null counts and percentages; `duplicate_detector` detects repeated rows or selected columns; `outlier_detector` uses configurable IQR bounds; `data_aggregator` groups and computes sum, mean, count, min, or max; `json_exporter` writes validated JSON atomically within an approved workspace; `markdown_report_generator` builds an escaped readable report.
+
+Tool execution timeouts bound caller wait time and signal cooperative cancellation. Python cannot forcibly stop an already-running synchronous function, so registered implementations must be trusted, bounded, and call context checkpoints around longer work. File tools have explicit size limits and do not log their payloads.
 
 ## Local-first and safety principles
 
