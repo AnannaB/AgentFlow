@@ -17,6 +17,7 @@ from agentflow.domain.states import (
 )
 
 _SENSITIVE_DETAIL_KEY = re.compile(r"(?i)(api[_-]?key|token|password|secret|authorization)")
+TOOL_RESULT_MAX_BYTES = 256 * 1024
 
 
 def _validate_json_size(value: JsonValue, field_name: str, max_bytes: int) -> JsonValue:
@@ -138,7 +139,7 @@ class ToolResult(DomainModel):
 
     @model_validator(mode="after")
     def data_is_bounded_json(self) -> Self:
-        _validate_json_size(self.data, "data", 64 * 1024)
+        _validate_json_size(self.data, "data", TOOL_RESULT_MAX_BYTES)
         return self
 
 
@@ -167,6 +168,7 @@ class WorkflowStep(DomainModel):
     step_key: str = Field(min_length=1, max_length=100)
     position: int = Field(ge=0)
     tool_name: str = Field(min_length=1, max_length=100)
+    tool_version: str | None = Field(default=None, min_length=1, max_length=64)
     arguments: dict[str, JsonValue] = Field(default_factory=dict)
     depends_on: list[str] = Field(default_factory=list, max_length=100)
     required: bool = True

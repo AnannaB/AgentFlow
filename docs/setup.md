@@ -56,6 +56,35 @@ python -m ruff format --check .
 
 The test suite does not require a live Ollama service. The CI workflow installs the package and development extras on Windows and Ubuntu, then runs pytest and Ruff.
 
+## Execute a persisted workflow (Phase 3)
+
+The engine accepts an already validated `ExecutionPlan` and an existing registry; it does not generate plans from natural language.
+
+```python
+from agentflow.application.execution import WorkflowExecutionService
+from agentflow.domain.models import ExecutionPlan, PlanStep
+from agentflow.storage.sqlite import SQLiteDatabase, SQLiteRepository
+from agentflow.tools.builtins import create_builtin_registry
+
+database = SQLiteDatabase("data/agentflow.sqlite3")
+database.initialize()
+repository = SQLiteRepository(database)
+service = WorkflowExecutionService(repository, create_builtin_registry())
+plan = ExecutionPlan(
+    objective_summary="Calculate a result",
+    steps=[
+        PlanStep(step_key="calculate", tool_name="calculator", arguments={"expression": "6 * 7"})
+    ],
+)
+run = service.create_run(plan)
+result = service.execute(run.id)
+print(result.status)
+```
+
+Execution persists each attempt and pins every step to the selected tool version. Steps execute sequentially in plan order. Output references use only the exact `{"$agentflow_ref":{"step_key":"...","pointer":"/..."}}` object form with RFC 6901 JSON Pointer, and resolve only successful direct dependencies in the same run. Retries require retryable and idempotent tool metadata plus a classified transient/busy error. Optional failures remain recorded; their dependants are skipped, while independent steps may continue.
+
+Approval requests are persisted and bound to run/step scope and a digest. A matching approved record with a resolution timestamp is required; execution has no caller-supplied approval flag. Process interruptions are recorded with `PAUSED` and `error_code=interrupted`; the engine does not automatically replay uncertain work and has no general resume/replay UI yet.
+
 ## Use the Phase 2 tool registry
 
 ```python

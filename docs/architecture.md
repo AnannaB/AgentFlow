@@ -58,9 +58,9 @@ Each explicit registration includes name/version, description, strict Pydantic i
 
 Policy can require plan-level or step-level approval. The dashboard displays exact objective, step graph, tool names, validated arguments, risks, and expected effects. Decisions bind to a plan/argument digest; any mutation invalidates approval. Rejection is persisted and causes a visible paused or terminal outcome. The initial local single-user workflow is not an identity system; multi-user deployment requires separate authorization design.
 
-## SQLite schema (Phase 1)
+## SQLite schema (Phases 1 and 3)
 
-The first schema is implemented in `src/agentflow/storage/migrations/0001_initial.sql` and applied by `SQLiteDatabase.initialize()`. Future schema changes must use a new ordered migration. Connections enable foreign keys and a busy timeout, are scoped to each operation, and are always closed. Write transactions use `BEGIN IMMEDIATE`; repository state changes and their events commit or roll back together. Timestamps are stored as fixed precision UTC ISO-8601 text. JSON payloads are validated as Pydantic models; tool arguments/results are limited to 64 KiB, event details to 16 KiB, and non-finite numbers and credential-like event keys are rejected.
+The schema is implemented by ordered SQL migrations in `src/agentflow/storage/migrations/` and applied by `SQLiteDatabase.initialize()`. Future schema changes must use a new ordered migration. Connections enable foreign keys and a busy timeout, are scoped to each operation, and are always closed. Write transactions use `BEGIN IMMEDIATE`; repository state changes and their events commit or roll back together. Timestamps are stored as fixed precision UTC ISO-8601 text. JSON payloads are validated as Pydantic models; tool arguments are limited to 64 KiB, tool outputs to 256 KiB, event details to 16 KiB, and non-finite numbers and credential-like event keys are rejected.
 
 ### `workflow_runs`
 
@@ -68,7 +68,7 @@ The first schema is implemented in `src/agentflow/storage/migrations/0001_initia
 
 ### `workflow_steps`
 
-`id` UUID primary key; `run_id` FK; `step_key`; `position`; `tool_name`; `arguments_json`; `depends_on_json`; `required`; `approval_required`; `status`; timestamps. Unique `(run_id, step_key)` and `(run_id, position)`.
+`id` UUID primary key; `run_id` FK; `step_key`; `position`; `tool_name`; pinned `tool_version`; `arguments_json`; `depends_on_json`; `required`; `approval_required`; `status`; timestamps. Unique `(run_id, step_key)` and `(run_id, position)`. Migration `0002_workflow_step_tool_version.sql` adds the version column; new runs persist the exact selected registry version and reject unavailable versions at execution time.
 
 ### `step_attempts`
 
@@ -90,7 +90,7 @@ The initial migration indexes run history by `(created_at, id)` and status/date,
 
 ## Pydantic contracts
 
-Phase 1 implements strict frozen models with `extra="forbid"`, bounded fields/lists, timezone-aware UTC timestamps, and safe defaults (`Field(default_factory=list/dict)`). Implemented contracts include `WorkflowRun`, `WorkflowStep`, `StepAttempt`, `ApprovalRequest`, `RunEvent`, `WorkflowTemplate`, `PlanStep`, `ExecutionPlan`, and `ToolResult`. Plan validation rejects duplicate step keys, invalid dependency references, and dependency cycles. Because Pydantic freezing is shallow, repository writes revalidate a JSON snapshot so in-place mutations of nested payloads cannot bypass validation. Persisted JSON is also revalidated when loaded. `RunRequest`, `ApprovalDecision`, tool-specific schemas, and report/analytics query models remain for their later phases.
+The domain uses strict frozen models with `extra="forbid"`, bounded fields/lists, timezone-aware UTC timestamps, and safe defaults (`Field(default_factory=list/dict)`). Contracts include `WorkflowRun`, `WorkflowStep`, `StepAttempt`, `ApprovalRequest`, `RunEvent`, `WorkflowTemplate`, `PlanStep`, `ExecutionPlan`, and `ToolResult`. Phase 3 adds `FailureDetail`, `StepExecutionResult`, and `ExecutionResult`. Plan validation rejects duplicate step keys, invalid dependency references, and dependency cycles. Repository writes revalidate JSON snapshots; persisted JSON is revalidated when loaded. `ToolResult` enforces a 256 KiB compact JSON UTF-8 data limit aligned with the registry.
 
 `SQLiteRepository` provides CRUD for all six persisted entities. `transaction()` groups repository calls on one connection. Run/step state changes go through `transition_run()` / `transition_step()`; direct updates cannot change lifecycle state. A transition and its corresponding `RunEvent` are written in the same transaction.
 
@@ -127,7 +127,7 @@ Package metadata/dependencies, validated settings, structured redacting logger, 
 
 Domain contracts/state machine, initial SQLite migration/repository, transactional state changes, and unit/integration tests are implemented. The LLM, tool registry, application services, and dashboard remain out of scope. Files: `domain/models.py`, `states.py`, `transitions.py`, `errors.py`, `storage/protocols.py`, `storage/sqlite.py`, `storage/migrations/`, and corresponding tests.
 
-### Phase 2 — tool registry (current)
+### Phase 2 — tool registry (completed)
 
 Implement a typed, versioned tool registry and deterministic built-ins. This phase does not include workflow planning, templates, or execution. The registry validates Pydantic inputs and outputs, enforces metadata-based approval, bounded concurrency, timeouts, JSON serializability, and tool version selection. Discovery returns metadata and schemas only. File tools require explicit existing workspace roots and enforce byte, row, column, and group limits. Registered implementations are trusted application code; model output can only select a registered name and validated data, never executable code.
 
@@ -135,15 +135,19 @@ Built-ins are `calculator`, `date_difference`, `date_calculate`, `csv_profiler`,
 
 Timeouts bound registry wait time and signal cooperative cancellation. Python cannot safely kill a synchronous worker; registry concurrency remains occupied until a timed-out callable exits. Future custom tools must use bounded operations and checkpoints. No arbitrary generated code, shell, or SQL is accepted.
 
-The registry reports failures with typed, sanitized `ToolError` subclasses and does not log raw inputs or outputs. Persistent attempt/error history belongs to the Phase 4 execution service; Phase 2 does not write run events or attempt records.
+The registry reports failures with typed, sanitized `ToolError` subclasses and does not log raw inputs or outputs. Persistent attempt and error history is implemented in Phase 3.
 
-### Phase 3 — planning and templates
+### Phase 3 — workflow execution (completed)
 
-Implement deterministic rule planning and plan validation, then workflow template CRUD/version snapshots. Templates are validated plan data, not executable code. Test intent recognition, constraints, and safe template reuse. Proposed files: `planning/rule_planner.py`, `planning/plan_validator.py`, template application service and tests.
+`application.WorkflowExecutionService` persists a validated plan snapshot, step records, attempts, events, and state transitions through the existing repository and registry. Scheduling is sequential and stable in plan order. Output references use only the exact `$agentflow_ref` object with `step_key` and RFC 6901 JSON Pointer. They resolve only from successful direct dependencies in the same run; malformed markers, pointer escapes/indices, or missing values fail before tool invocation.
 
-### Phase 4 — execution and recovery
+Approval requests are matched against exact run, step scope and plan/argument digest. Only persisted `APPROVED` requests with `resolved_at` set unlock an approved context. The executor accepts no caller approval flag. Each attempt is persisted separately. Retries are bounded to explicitly retryable, idempotent tools with classified transient/busy failures. Validation, permission, timeout, and uncertain side effects are not retried. Optional failures remain in history and do not alone fail a run; dependants of any unsuccessful step are skipped while independent steps continue.
 
-Implement workflow service, sequential dependency executor, transactional transitions, attempt history, cancellation and bounded retry/recovery. Add safe replay-as-new-run semantics and tests. Proposed files: `application/workflow_service.py`, `execution/`, repository updates and tests.
+`recover_interrupted_run()` moves an active persisted run to `PAUSED`, records `run.interrupted` and `error_code=interrupted`, and marks an in-progress attempt uncertain/failed. It never invokes that tool again. Paused runs are not executable; explicit resolution or a new run is required. If a user cancels while a synchronous tool outcome is uncertain, the run is paused with a cancellation-specific uncertain outcome; cooperative cancellation cannot forcibly stop Python code. General resume and replay-as-new-run services are not implemented.
+
+### Phase 4 — planning and templates
+
+Implement deterministic rule planning, plan validation service, and template CRUD/version snapshots. Templates are validated plan data, not executable code. Proposed files: `planning/rule_planner.py`, `planning/plan_validator.py`, template application service and tests.
 
 ### Phase 5 — Ollama and diagnostics
 

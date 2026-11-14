@@ -52,7 +52,10 @@ def test_database_initializes_idempotently_with_explicit_migration(database) -> 
             ).fetchall()
         }
 
-    assert [(row["version"], row["name"]) for row in versions] == [(1, "initial")]
+    assert [(row["version"], row["name"]) for row in versions] == [
+        (1, "initial"),
+        (2, "workflow_step_tool_version"),
+    ]
     assert {
         "workflow_runs",
         "workflow_steps",

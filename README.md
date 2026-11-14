@@ -2,7 +2,7 @@
 
 AgentFlow is a local-first agentic workflow orchestration platform. Users will describe an objective in natural language; AgentFlow will plan and execute validated workflows using registered tools, with local Ollama inference and a rule-based fallback.
 
-> **Current status:** Phase 1 domain and SQLite persistence and Phase 2 tool registry are implemented. Planning, workflow execution, and dashboard are not implemented yet.
+> **Current status:** Phases 0–3 are implemented: foundation, domain and SQLite persistence, secure tool registry, and sequential workflow execution. Ollama planning and the dashboard are not implemented yet.
 
 ## Requirements
 
@@ -34,7 +34,7 @@ python -m ruff format --check .
 
 ## Architecture and roadmap
 
-See [Architecture](docs/architecture.md) for component boundaries, data flow, the Phase 1 persistence model, security controls, and phased delivery. The roadmap is incremental; workflow execution is not implemented yet.
+See [Architecture](docs/architecture.md) for component boundaries, data flow, persistence, execution behavior, security controls, and phased delivery.
 
 Initialize the Phase 1 database and create a first run from Python:
 
@@ -60,6 +60,16 @@ Create a registry with `create_builtin_registry()` from `agentflow.tools.builtin
 Built-ins: `calculator` supports bounded basic arithmetic; `date_difference` and `date_calculate` provide date arithmetic; `csv_profiler` reports dataset shape, columns, missing values, types, and basic statistics; `missing_value_analyzer` reports null counts and percentages; `duplicate_detector` detects repeated rows or selected columns; `outlier_detector` uses configurable IQR bounds; `data_aggregator` groups and computes sum, mean, count, min, or max; `json_exporter` writes validated JSON atomically within an approved workspace; `markdown_report_generator` builds an escaped readable report.
 
 Tool execution timeouts bound caller wait time and signal cooperative cancellation. Python cannot forcibly stop an already-running synchronous function, so registered implementations must be trusted, bounded, and call context checkpoints around longer work. File tools have explicit size limits and do not log their payloads.
+
+## Phase 3 workflow execution
+
+`WorkflowExecutionService` persists a validated execution plan and pinned tool versions with `create_run()`, then runs it with `execute(run_id)`. Steps are scheduled sequentially in plan order after their direct dependencies succeed. Inputs may contain only the exact `{"$agentflow_ref":{"step_key":"...","pointer":"/..."}}` marker using RFC 6901 JSON Pointer; references are limited to successful direct dependencies in the same run.
+
+Every invocation has a durable attempt record. Bounded retries occur only for explicitly retryable, idempotent tools that raise classified `ToolBusyError` or `ToolTransientError`. Validation, permission, timeout, and uncertain outcomes are not retried. Optional failures remain in history and do not alone fail a run; dependants of any unsuccessful step are skipped, while independent steps continue.
+
+Approval is verified from persisted requests matching exact run, step (or plan scope), and digest. The request must be approved and resolved before an approved execution context is created; execution accepts no approval boolean. Process interruption is recorded as `PAUSED` with `error_code=interrupted`; uncertain attempts are never automatically replayed. Recovery records the interruption but does not resume work. A user cancellation during an uncertain tool call is also paused for review because synchronous Python cannot be forcibly stopped safely.
+
+Persisted tool results are limited to 256 KiB measured as compact JSON encoded in UTF-8. See [Installation and setup](docs/setup.md) for a minimal execution example.
 
 ## Local-first and safety principles
 

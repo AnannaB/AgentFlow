@@ -260,9 +260,10 @@ class SQLiteRepository:
         with self._write_connection() as connection:
             connection.execute(
                 """INSERT INTO workflow_steps (
-                    id, run_id, step_key, position, tool_name, arguments_json, depends_on_json,
+                    id, run_id, step_key, position, tool_name, tool_version, arguments_json,
+                    depends_on_json,
                     required, approval_required, status, created_at, started_at, finished_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 _step_values(entity),
             )
         return entity
@@ -298,7 +299,8 @@ class SQLiteRepository:
             values = _step_values(entity)
             cursor = connection.execute(
                 """UPDATE workflow_steps SET run_id=?, step_key=?, position=?, tool_name=?,
-                arguments_json=?, depends_on_json=?, required=?, approval_required=?, status=?,
+                tool_version=?, arguments_json=?, depends_on_json=?, required=?,
+                approval_required=?, status=?,
                 created_at=?, started_at=?, finished_at=? WHERE id=? AND status=?""",
                 (*values[1:], str(entity.id), current.value),
             )
@@ -642,6 +644,7 @@ def _step_values(entity: WorkflowStep) -> tuple[Any, ...]:
         entity.step_key,
         entity.position,
         entity.tool_name,
+        entity.tool_version,
         _json(entity.arguments),
         _json(entity.depends_on),
         int(entity.required),

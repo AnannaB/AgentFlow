@@ -47,6 +47,21 @@ class ToolExecutionContext:
             _deadline=deadline,
         )
 
+    def with_approval(self) -> "ToolExecutionContext":
+        """Create an approved child sharing this context's cancellation signal.
+
+        Callers must derive this context only after verifying an authoritative
+        approval record. The registry treats the flag as a gate, not as proof.
+        """
+        return ToolExecutionContext(
+            workspace_roots=self.workspace_roots,
+            approved=True,
+            correlation_id=self.correlation_id,
+            _cancelled=self._cancelled,
+            _parent_cancelled=self._parent_cancelled,
+            _deadline=self._deadline,
+        )
+
     def cancel(self) -> None:
         """Signal cooperative cancellation to the active tool implementation."""
         self._cancelled.set()

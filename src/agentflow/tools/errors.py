@@ -87,6 +87,18 @@ class ToolExecutionError(ToolError):
         )
 
 
+class ToolTransientError(ToolError):
+    """A registered tool reports a transient failure known to precede side effects."""
+
+    def __init__(self, message: str, *, tool_name: str, tool_version: str) -> None:
+        super().__init__(
+            message,
+            tool_name=tool_name,
+            tool_version=tool_version,
+            code="transient_failure",
+        )
+
+
 class ToolTimeoutError(ToolError):
     def __init__(self, name: str, version: str, timeout_seconds: float) -> None:
         super().__init__(
