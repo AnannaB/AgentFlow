@@ -80,7 +80,7 @@ The schema is implemented by ordered SQL migrations in `src/agentflow/storage/mi
 
 ### `approval_requests`
 
-`id`; `run_id` FK; optional `step_id`; `status`; requested/resolved timestamps; `decision_note`; `plan_digest`. A composite foreign key ensures a step-level approval points to a step from the same run; deleting that step removes its approval request.
+`id`; `run_id` FK; optional `step_id`; `purpose` (`workflow` or `report_export`); `status`; requested/resolved timestamps; `decision_note`; `plan_digest`. A composite foreign key ensures a step-level approval points to a step from the same run; deleting that step removes its approval request. Migration `0003_approval_purpose.sql` adds purpose and a pending-request index.
 
 ### `run_events`
 
@@ -149,13 +149,13 @@ Approval requests are matched against exact run, step scope and plan/argument di
 
 `planning.OllamaClient` uses the local `/api/chat` endpoint with JSON-schema output, configured model and timeout. `PlanValidator` parses the existing `ExecutionPlan`, enforces registry allowlisting and each selected tool's Pydantic input schema, and raises risk to at least the registered metadata floor. `PlanningService` returns explicit Ollama or rule-based provenance and never executes during `plan()`. The deterministic fallback recognizes only explicit arithmetic and ISO date operations; unsupported objectives fail with a typed error. The existing execution service accepts the validated plan with persisted planner provenance. Tests mock HTTP; a live Ollama server is not required by CI.
 
-### Phase 5 — templates and model diagnostics
+### Phase 5 — approvals and workflow reporting (implemented)
 
-Implement workflow template CRUD/version snapshots and user-facing Ollama connection/model diagnostics. Templates are validated plan data, not executable code. Model diagnostics must avoid logging credentials or request content.
+`application.ApprovalService` lists bounded pending requests, checks exact run/step/purpose/digest scope, and persists decisions plus events transactionally. Execution uses the latest matching workflow decision so a stale approval cannot supersede a newer pending or rejected request. `WorkflowReportService` builds bounded reports from persisted run/step/attempt data, redacts sensitive fields and common credential strings, and reports optional/failed steps. Markdown output uses the registered generator; JSON output uses the registered exporter only after a persisted approval tied to the exact report and destination. Both paths are workspace-confined and size-bounded.
 
-### Phase 6 — approvals, history, analytics, reporting
+### Phase 6 — history and analytics
 
-Implement approval workflow, paginated history/replay inspection, validated retry/replay actions, bounded analytics and reports. Test pagination, metrics, digest checks, and side-effect safeguards. Proposed files: `application/approval_service.py`, `history_service.py`, `analytics_service.py`, `report_service.py`, tests.
+Implement paginated execution history/replay inspection, validated retry/replay actions, and bounded analytics. Test pagination, metrics, and side-effect safeguards.
 
 ### Phase 7 — Streamlit dashboard
 

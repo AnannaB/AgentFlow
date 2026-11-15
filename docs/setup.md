@@ -79,6 +79,25 @@ The resulting plan contains a `calculator` step with `expression="6 * 7"`. If Ol
 
 Planning alone does not create or execute a run. To explicitly persist a plan, call `planner.create_run(result, workflow_execution_service)`. To request execution, call `planner.execute(result, workflow_execution_service, workspace_roots=...)`.
 
+## Approvals and workflow reports (Phase 5)
+
+After a run pauses for approval, resolve the persisted request using its exact scope and digest:
+
+```python
+from agentflow.application.approvals import ApprovalService
+
+approvals = ApprovalService(repository, workflow_execution_service)
+for request in approvals.list_pending(run_id=run_id):
+    approvals.approve(
+        request.id,
+        run_id=request.run_id,
+        step_id=request.step_id,
+        plan_digest=request.plan_digest,
+    )
+```
+
+Build or export a sanitized report with `WorkflowReportService(repository, registry, approvals, workspace_roots=(workspace,))`. Call `build_report(run_id)` for structured data or `export_markdown(run_id, "reports/run.md")` for a workspace Markdown file. JSON export uses a two-step approval: `request_json_export()` returns the exact content/path digest; resolve it with `ApprovalService.approve()`, then pass its `approval_id` to `export_json()`. A pending, rejected, or mismatched report export request cannot invoke the protected JSON exporter. Reports are size-bounded; sensitive keys, credential assignments, bearer tokens and common API token strings are redacted.
+
 ## Execute a persisted workflow (Phase 3)
 
 The engine accepts an already validated `ExecutionPlan` and an existing registry; it does not generate plans from natural language.

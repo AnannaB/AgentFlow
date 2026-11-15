@@ -415,9 +415,9 @@ class SQLiteRepository:
             self._validate_approval_scope(connection, entity)
             connection.execute(
                 """INSERT INTO approval_requests (
-                    id, run_id, step_id, status, plan_digest, decision_note, requested_at,
+                    id, run_id, step_id, purpose, status, plan_digest, decision_note, requested_at,
                     resolved_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 _approval_values(entity),
             )
         return entity
@@ -438,14 +438,33 @@ class SQLiteRepository:
             ).fetchall()
         return [_approval_from_row(row) for row in rows]
 
+    def list_pending_approvals(
+        self, limit: int = 100, purpose: str | None = None
+    ) -> list[ApprovalRequest]:
+        limit = _bounded_limit(limit, 500)
+        with self._read_connection() as connection:
+            if purpose is None:
+                rows = connection.execute(
+                    """SELECT * FROM approval_requests WHERE status='pending'
+                    ORDER BY requested_at, id LIMIT ?""",
+                    (limit,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """SELECT * FROM approval_requests WHERE status='pending' AND purpose=?
+                    ORDER BY requested_at, id LIMIT ?""",
+                    (purpose, limit),
+                ).fetchall()
+        return [_approval_from_row(row) for row in rows]
+
     def update_approval(self, entity: ApprovalRequest) -> ApprovalRequest:
         entity = _validated_snapshot(entity)
         with self._write_connection() as connection:
             self._validate_approval_scope(connection, entity)
             values = _approval_values(entity)
             cursor = connection.execute(
-                """UPDATE approval_requests SET run_id=?, step_id=?, status=?, plan_digest=?,
-                decision_note=?, requested_at=?, resolved_at=? WHERE id=?""",
+                """UPDATE approval_requests SET run_id=?, step_id=?, purpose=?, status=?,
+                plan_digest=?, decision_note=?, requested_at=?, resolved_at=? WHERE id=?""",
                 (*values[1:], str(entity.id)),
             )
             _require_updated(cursor.rowcount, "approval request", entity.id)
@@ -693,6 +712,7 @@ def _approval_values(entity: ApprovalRequest) -> tuple[Any, ...]:
         str(entity.id),
         str(entity.run_id),
         str(entity.step_id) if entity.step_id else None,
+        entity.purpose,
         entity.status.value,
         entity.plan_digest,
         entity.decision_note,

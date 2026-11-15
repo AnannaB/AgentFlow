@@ -2,7 +2,7 @@
 
 AgentFlow is a local-first agentic workflow orchestration platform. Users will describe an objective in natural language; AgentFlow will plan and execute validated workflows using registered tools, with local Ollama inference and a rule-based fallback.
 
-> **Current status:** Phases 0–4 are implemented: foundation, domain and SQLite persistence, secure tool registry, workflow execution, and local Ollama planning with deterministic fallback. The dashboard is not implemented yet.
+> **Current status:** Phases 0–5 are implemented: foundation, domain and SQLite persistence, secure tool registry, workflow execution, local Ollama planning, and approval/report services. The dashboard is not implemented yet.
 
 ## Requirements
 
@@ -76,6 +76,10 @@ Persisted tool results are limited to 256 KiB measured as compact JSON encoded i
 `PlanningService.plan(objective)` asks the configured Ollama model for a JSON-schema-constrained plan, then validates the plan structure, registered tool names, and each tool's Pydantic input contract. It returns an explicit `planner_kind` and model or fallback reason. It does not execute the plan. Call `PlanningService.create_run(result, execution_service)` to persist it, or `PlanningService.execute(...)` when execution is explicitly intended.
 
 When Ollama is unavailable or returns an invalid plan, the configurable fallback recognizes only explicit arithmetic expressions and ISO date arithmetic. Unsupported objectives return a typed error instead of claiming a plan was made. For example, `Calculate 6 * 7` produces a one-step plan selecting the registered `calculator` tool with `{"expression":"6 * 7"}`. Neither planner can supply code or select unregistered tools.
+
+## Phase 5 approvals and reports
+
+Use `ApprovalService.list_pending()` to review requests, then approve or reject with the request's exact run ID, step ID, and digest. `WorkflowReportService.build_report(run_id)` creates a bounded report with planner provenance, timing, step attempts, outcomes, and redacted outputs. Markdown exports use the registered generator and write only within configured workspace roots. JSON report exports require a persisted `report_export` approval bound to the report content and destination before the registered JSON exporter can run.
 
 ## Local-first and safety principles
 

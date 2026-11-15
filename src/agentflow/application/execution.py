@@ -304,6 +304,42 @@ class WorkflowExecutionService:
             )
         return self._result(run_id, 0)
 
+    def approval_digest(self, run_id: UUID, step_id: UUID | None = None) -> str:
+        """Return the current expected digest for an approval-required scope."""
+        run = self._get_run(run_id)
+        if run.plan is None:
+            raise InvalidWorkflowPlanError("Persisted workflow run has no execution plan")
+        plan = _validated_plan_snapshot(run.plan)
+        plan_digest = _digest_plan(plan)
+        if step_id is None:
+            if not plan.requires_approval:
+                raise InvalidWorkflowPlanError("This workflow does not require plan approval")
+            return plan_digest
+
+        step = self._repository.get_step(step_id)
+        if step is None or step.run_id != run_id:
+            raise InvalidWorkflowPlanError("Approval step does not belong to the requested run")
+        plan_step = next((item for item in plan.steps if item.step_key == step.step_key), None)
+        if plan_step is None or not step.approval_required or step.tool_version is None:
+            raise InvalidWorkflowPlanError("This workflow step does not require approval")
+        if (
+            step.tool_name != plan_step.tool_name
+            or step.arguments != plan_step.arguments
+            or step.depends_on != plan_step.depends_on
+        ):
+            raise InvalidWorkflowPlanError("Persisted step does not match the validated plan")
+        try:
+            definition = self._registry.get(step.tool_name, step.tool_version)
+        except ToolError as error:
+            raise InvalidWorkflowPlanError("Pinned tool version is unavailable") from error
+        return _digest_step(plan_digest, plan_step, definition.metadata.version)
+
+    def approval_decision(
+        self, run_id: UUID, step_id: UUID | None, digest: str
+    ) -> ApprovalDecision:
+        """Expose the same exact-scope approval check used by execution."""
+        return self._approval_decision(run_id, step_id, digest)
+
     def _execute_active(
         self,
         run: WorkflowRun,
@@ -866,19 +902,18 @@ class WorkflowExecutionService:
     ) -> ApprovalDecision:
         matching = [
             approval
-            for approval in self._repository.list_approvals(run_id)
+            for approval in self._repository.list_approvals(run_id, limit=500)
             if approval.run_id == run_id
             and approval.step_id == step_id
+            and approval.purpose == "workflow"
             and approval.plan_digest == digest
         ]
-        if any(
-            item.status == ApprovalStatus.APPROVED and item.resolved_at is not None
-            for item in matching
-        ):
+        if not matching:
+            return "pending"
+        latest = matching[-1]
+        if latest.status == ApprovalStatus.APPROVED and latest.resolved_at is not None:
             return "approved"
-        if any(
-            item.status in {ApprovalStatus.REJECTED, ApprovalStatus.EXPIRED} for item in matching
-        ):
+        if latest.status in {ApprovalStatus.REJECTED, ApprovalStatus.EXPIRED}:
             return "rejected"
         return "pending"
 
@@ -886,12 +921,16 @@ class WorkflowExecutionService:
         self, run_id: UUID, scope: str, step_id: UUID | None, digest: str
     ) -> None:
         with self._repository.transaction():
-            approvals = self._repository.list_approvals(run_id)
+            approvals = self._repository.list_approvals(run_id, limit=500)
             pending_exists = any(
                 item.run_id == run_id
                 and item.step_id == step_id
                 and item.plan_digest == digest
-                and item.status == ApprovalStatus.PENDING
+                and item.purpose == "workflow"
+                and (
+                    item.status == ApprovalStatus.PENDING
+                    or (item.status == ApprovalStatus.APPROVED and item.resolved_at is None)
+                )
                 for item in approvals
             )
             if not pending_exists:

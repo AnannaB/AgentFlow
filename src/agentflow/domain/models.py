@@ -3,7 +3,7 @@
 import json
 import re
 from datetime import UTC, datetime
-from typing import Self
+from typing import Literal, Self
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -206,6 +206,7 @@ class ApprovalRequest(DomainModel):
     id: UUID = Field(default_factory=uuid4)
     run_id: UUID
     step_id: UUID | None = None
+    purpose: Literal["workflow", "report_export"] = "workflow"
     status: ApprovalStatus = ApprovalStatus.PENDING
     plan_digest: str = Field(min_length=1, max_length=128)
     decision_note: str | None = Field(default=None, max_length=4000)

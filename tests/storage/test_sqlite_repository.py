@@ -55,6 +55,7 @@ def test_database_initializes_idempotently_with_explicit_migration(database) -> 
     assert [(row["version"], row["name"]) for row in versions] == [
         (1, "initial"),
         (2, "workflow_step_tool_version"),
+        (3, "approval_purpose"),
     ]
     assert {
         "workflow_runs",
@@ -156,6 +157,24 @@ def test_approval_and_template_persist_after_database_reopen(database, tmp_path)
 
     assert repository_after_reopen.get_approval(approval.id) == approval
     assert repository_after_reopen.get_template(template.id) == template
+
+
+def test_pending_approvals_are_bounded_and_filterable_by_purpose(repository) -> None:
+    run = repository.create_run(WorkflowRun(objective="Pending approval run"))
+    workflow = repository.create_approval(
+        ApprovalRequest(run_id=run.id, plan_digest="workflow-digest")
+    )
+    export = repository.create_approval(
+        ApprovalRequest(
+            run_id=run.id,
+            purpose="report_export",
+            plan_digest="export-digest",
+        )
+    )
+
+    assert repository.list_pending_approvals(limit=1) in ([workflow], [export])
+    assert repository.list_pending_approvals(purpose="report_export") == [export]
+    assert repository.list_pending_approvals(purpose="workflow") == [workflow]
 
 
 def test_step_approval_must_belong_to_its_run(repository) -> None:
