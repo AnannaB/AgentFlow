@@ -153,14 +153,10 @@ Approval requests are matched against exact run, step scope and plan/argument di
 
 `application.ApprovalService` lists bounded pending requests, checks exact run/step/purpose/digest scope, and persists decisions plus events transactionally. Execution uses the latest matching workflow decision so a stale approval cannot supersede a newer pending or rejected request. `WorkflowReportService` builds bounded reports from persisted run/step/attempt data, redacts sensitive fields and common credential strings, and reports optional/failed steps. Markdown output uses the registered generator; JSON output uses the registered exporter only after a persisted approval tied to the exact report and destination. Both paths are workspace-confined and size-bounded.
 
-### Phase 6 — history and analytics
+### Phase 6 — Streamlit dashboard (implemented)
 
-Implement paginated execution history/replay inspection, validated retry/replay actions, and bounded analytics. Test pagination, metrics, and side-effect safeguards.
+`dashboard.app` presents overview metrics, validated CSV upload and preview, AI plan review, separate save/run actions, bounded execution history, approval decisions, report exports, and session-local Ollama/workspace configuration. `dashboard.services` composes the existing repository, registry, planner, execution, approval and reporting services. CSV upload validation enforces the built-in 10 MiB/100,000 row/256 column limits and generates an internal workspace path. The UI does not execute code from a file or plan. During execution, the existing engine runs in a worker while the UI polls persisted run/step state for actual status and completion progress. Ollama diagnostics use the local `/api/tags` endpoint.
 
-### Phase 7 — Streamlit dashboard
-
-Build professional dashboard with workflow graph, dependencies, state/progress, templates, run history, approval, analytics, diagnostics, loading/empty/error states, and input validation. Proposed files: `ui/app.py`, `ui/pages/`, UI/service acceptance tests; use existing Plotly dependency for the graph/metrics where appropriate.
-
-### Phase 8 — packaging and operational hardening
+### Phase 7 — packaging and operational hardening
 
 Add Docker packaging, operational docs, CI hardening, Windows/Docker path verification, security review, and end-to-end regression coverage. Proposed files: `Dockerfile`, compose configuration if useful, `docs/operations.md`, CI updates and tests.

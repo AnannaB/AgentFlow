@@ -39,6 +39,8 @@ Copy `.env.example` to `.env`. Settings use the `AGENTFLOW_` prefix and are vali
 | `AGENTFLOW_OLLAMA_TIMEOUT_SECONDS` | `60` | Per-request timeout, capped at 600 seconds. |
 | `AGENTFLOW_OLLAMA_FALLBACK_ENABLED` | `true` | Use deterministic rules when Ollama is unavailable or its plan is invalid. Unsupported fallback objectives return an error. |
 | `AGENTFLOW_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`. |
+| `AGENTFLOW_DATABASE_PATH` | `data/agentflow.sqlite3` | Local SQLite database path. |
+| `AGENTFLOW_WORKSPACE_PATH` | `workspace` | Directory used for uploaded CSV data and report exports. |
 
 Do not commit `.env`, credentials, model data, or local databases. `.gitignore` excludes common local configuration and data files.
 
@@ -62,6 +64,16 @@ python -m ruff format --check .
 ```
 
 The test suite does not require a live Ollama service. The CI workflow installs the package and development extras on Windows and Ubuntu, then runs pytest and Ruff.
+
+## Launch the dashboard (Phase 6)
+
+From the repository root after installation:
+
+```powershell
+python -m streamlit run src/agentflow/dashboard/app.py
+```
+
+The dashboard opens on the local Streamlit address. It initializes the SQLite database, creates the configured workspace when needed, and keeps changed model/workspace settings in the current browser session. Uploaded CSV files are limited to 10 MiB, 100,000 rows, and 256 columns. Review the generated plan, save it as a workflow, then use the separate **Run workflow** action. Do not expose this local operator interface to an untrusted network; approval actions use the backend's scope checks but this phase does not add user authentication.
 
 ## Plan a natural-language objective (Phase 4)
 

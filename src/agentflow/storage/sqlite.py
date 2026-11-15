@@ -178,6 +178,14 @@ class SQLiteRepository:
                 ).fetchall()
         return [_run_from_row(row) for row in rows]
 
+    def count_runs_by_status(self) -> dict[str, int]:
+        """Return exact all-time run counts grouped by lifecycle status."""
+        with self._read_connection() as connection:
+            rows = connection.execute(
+                "SELECT status, COUNT(*) AS run_count FROM workflow_runs GROUP BY status"
+            ).fetchall()
+        return {str(row["status"]): int(row["run_count"]) for row in rows}
+
     def update_run(self, entity: WorkflowRun) -> WorkflowRun:
         entity = _validated_snapshot(entity)
         with self._write_connection() as connection:

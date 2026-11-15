@@ -2,7 +2,7 @@
 
 AgentFlow is a local-first agentic workflow orchestration platform. Users will describe an objective in natural language; AgentFlow will plan and execute validated workflows using registered tools, with local Ollama inference and a rule-based fallback.
 
-> **Current status:** Phases 0–5 are implemented: foundation, domain and SQLite persistence, secure tool registry, workflow execution, local Ollama planning, and approval/report services. The dashboard is not implemented yet.
+> **Current status:** Phases 0–6 are implemented: foundation, domain and SQLite persistence, secure tool registry, workflow execution, local Ollama planning, approval/report services, and the Streamlit dashboard.
 
 ## Requirements
 
@@ -22,7 +22,10 @@ py -3.13 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
+python -m streamlit run src/agentflow/dashboard/app.py
 ```
+
+The dashboard starts locally and provides workflow planning, execution, approvals, reporting, and Ollama settings. Planning and execution are separate actions.
 
 ## Development checks
 
@@ -80,6 +83,10 @@ When Ollama is unavailable or returns an invalid plan, the configurable fallback
 ## Phase 5 approvals and reports
 
 Use `ApprovalService.list_pending()` to review requests, then approve or reject with the request's exact run ID, step ID, and digest. `WorkflowReportService.build_report(run_id)` creates a bounded report with planner provenance, timing, step attempts, outcomes, and redacted outputs. Markdown exports use the registered generator and write only within configured workspace roots. JSON report exports require a persisted `report_export` approval bound to the report content and destination before the registered JSON exporter can run.
+
+## Phase 6 dashboard
+
+Launch with `python -m streamlit run src/agentflow/dashboard/app.py`. The default local database is `data/agentflow.sqlite3` and uploads/reports use the `workspace` directory; override them with `AGENTFLOW_DATABASE_PATH` and `AGENTFLOW_WORKSPACE_PATH`. The dashboard is intended for local operator use.
 
 ## Local-first and safety principles
 

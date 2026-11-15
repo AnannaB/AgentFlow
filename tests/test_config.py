@@ -1,5 +1,7 @@
 """Tests for validated Phase 0 settings."""
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -17,6 +19,16 @@ def test_settings_accept_valid_local_ollama_configuration() -> None:
     assert settings.ollama_model == "qwen2.5"
     assert settings.ollama_timeout_seconds == 30
     assert settings.ollama_fallback_enabled is True
+
+
+def test_settings_include_local_database_and_workspace_paths() -> None:
+    settings = Settings(
+        database_path="data/custom.sqlite3",
+        workspace_path="local-workspace",
+    )
+
+    assert settings.database_path == Path("data/custom.sqlite3")
+    assert settings.workspace_path == Path("local-workspace")
 
 
 @pytest.mark.parametrize(

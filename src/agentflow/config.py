@@ -1,6 +1,7 @@
 """Validated application configuration loaded from environment variables."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -9,7 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Settings for local model connectivity and application diagnostics."""
+    """Settings for local model connectivity and local workflow data."""
 
     model_config = SettingsConfigDict(
         env_prefix="AGENTFLOW_",
@@ -24,6 +25,8 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
     ollama_fallback_enabled: bool = True
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    database_path: Path = Path("data/agentflow.sqlite3")
+    workspace_path: Path = Path("workspace")
 
     @field_validator("ollama_base_url")
     @classmethod

@@ -67,6 +67,25 @@ def test_database_initializes_idempotently_with_explicit_migration(database) -> 
     } <= tables
 
 
+def test_run_counts_by_status_are_exact(repository) -> None:
+    queued = repository.create_run(WorkflowRun(objective="Queued run"))
+    succeeded = repository.create_run(WorkflowRun(objective="Successful run"))
+    repository.transition_run(succeeded.id, RunStatus.PLANNING)
+    repository.transition_run(succeeded.id, RunStatus.EXECUTING)
+    repository.transition_run(succeeded.id, RunStatus.VALIDATING)
+    repository.transition_run(succeeded.id, RunStatus.SUCCEEDED)
+    failed = repository.create_run(WorkflowRun(objective="Failed run"))
+    repository.transition_run(failed.id, RunStatus.PLANNING)
+    repository.transition_run(failed.id, RunStatus.FAILED)
+
+    assert repository.get_run(queued.id) is not None
+    assert repository.count_runs_by_status() == {
+        "queued": 1,
+        "succeeded": 1,
+        "failed": 1,
+    }
+
+
 def test_crud_for_every_persisted_entity(repository) -> None:
     run = repository.create_run(WorkflowRun(objective="Analyze report", plan=make_plan()))
     assert repository.get_run(run.id) == run
