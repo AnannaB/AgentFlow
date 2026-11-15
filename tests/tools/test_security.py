@@ -1,5 +1,6 @@
 """Workspace confinement and tool context checks."""
 
+import os
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -28,6 +29,24 @@ def test_workspace_path_allows_inside_and_rejects_traversal(tmp_path: Path):
         resolve_workspace_path(
             r"nested\..\..\outside.json", context, must_exist=False, tool_name="test"
         )
+    nested = workspace / "nested"
+    nested.mkdir()
+    assert (
+        resolve_workspace_path(
+            "nested/data.csv", context, must_exist=False, tool_name="test"
+        ).parent
+        == nested
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Foreign Windows drive path is POSIX-specific")
+def test_foreign_absolute_windows_path_is_not_treated_as_relative(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    context = ToolExecutionContext(workspace_roots=(workspace,))
+
+    with pytest.raises(ToolPermissionError):
+        resolve_workspace_path(r"C:\outside.json", context, must_exist=False, tool_name="test")
 
 
 def test_absolute_outside_and_symlink_escape_are_rejected(tmp_path: Path):
