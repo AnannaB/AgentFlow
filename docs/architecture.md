@@ -145,13 +145,13 @@ Approval requests are matched against exact run, step scope and plan/argument di
 
 `recover_interrupted_run()` moves an active persisted run to `PAUSED`, records `run.interrupted` and `error_code=interrupted`, and marks an in-progress attempt uncertain/failed. It never invokes that tool again. Paused runs are not executable; explicit resolution or a new run is required. If a user cancels while a synchronous tool outcome is uncertain, the run is paused with a cancellation-specific uncertain outcome; cooperative cancellation cannot forcibly stop Python code. General resume and replay-as-new-run services are not implemented.
 
-### Phase 4 — planning and templates
+### Phase 4 — local Ollama planning (implemented)
 
-Implement deterministic rule planning, plan validation service, and template CRUD/version snapshots. Templates are validated plan data, not executable code. Proposed files: `planning/rule_planner.py`, `planning/plan_validator.py`, template application service and tests.
+`planning.OllamaClient` uses the local `/api/chat` endpoint with JSON-schema output, configured model and timeout. `PlanValidator` parses the existing `ExecutionPlan`, enforces registry allowlisting and each selected tool's Pydantic input schema, and raises risk to at least the registered metadata floor. `PlanningService` returns explicit Ollama or rule-based provenance and never executes during `plan()`. The deterministic fallback recognizes only explicit arithmetic and ISO date operations; unsupported objectives fail with a typed error. The existing execution service accepts the validated plan with persisted planner provenance. Tests mock HTTP; a live Ollama server is not required by CI.
 
-### Phase 5 — Ollama and diagnostics
+### Phase 5 — templates and model diagnostics
 
-Implement local Ollama adapter, timeout handling, model/connection diagnostics, and configurable fallback. Mock HTTP tests plus opt-in local smoke test. Proposed file: `planning/ollama_planner.py`, diagnostics service, config and docs updates.
+Implement workflow template CRUD/version snapshots and user-facing Ollama connection/model diagnostics. Templates are validated plan data, not executable code. Model diagnostics must avoid logging credentials or request content.
 
 ### Phase 6 — approvals, history, analytics, reporting
 

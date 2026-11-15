@@ -31,7 +31,13 @@ from agentflow.domain.models import (
     WorkflowStep,
     utc_now,
 )
-from agentflow.domain.states import ApprovalStatus, AttemptStatus, RunStatus, StepStatus
+from agentflow.domain.states import (
+    ApprovalStatus,
+    AttemptStatus,
+    PlannerKind,
+    RunStatus,
+    StepStatus,
+)
 from agentflow.storage.protocols import WorkflowRepository
 from agentflow.tools.context import ToolExecutionContext
 from agentflow.tools.errors import (
@@ -91,13 +97,20 @@ class WorkflowExecutionService:
         self._active_contexts: dict[UUID, ToolExecutionContext] = {}
         self._active_lock = threading.RLock()
 
-    def create_run(self, plan: ExecutionPlan, *, objective: str | None = None) -> WorkflowRun:
+    def create_run(
+        self,
+        plan: ExecutionPlan,
+        *,
+        objective: str | None = None,
+        planner_kind: PlannerKind = PlannerKind.RULE_BASED,
+    ) -> WorkflowRun:
         """Persist a plan snapshot and ordered steps without executing any tool."""
         snapshot = _validated_plan_snapshot(plan)
         definitions = [self._registry.get(step.tool_name) for step in snapshot.steps]
         run = WorkflowRun(
             objective=objective if objective is not None else snapshot.objective_summary,
             plan=snapshot,
+            planner_kind=planner_kind,
         )
         steps = [
             WorkflowStep(

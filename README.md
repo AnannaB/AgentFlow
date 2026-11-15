@@ -2,13 +2,13 @@
 
 AgentFlow is a local-first agentic workflow orchestration platform. Users will describe an objective in natural language; AgentFlow will plan and execute validated workflows using registered tools, with local Ollama inference and a rule-based fallback.
 
-> **Current status:** Phases 0–3 are implemented: foundation, domain and SQLite persistence, secure tool registry, and sequential workflow execution. Ollama planning and the dashboard are not implemented yet.
+> **Current status:** Phases 0–4 are implemented: foundation, domain and SQLite persistence, secure tool registry, workflow execution, and local Ollama planning with deterministic fallback. The dashboard is not implemented yet.
 
 ## Requirements
 
 - Python 3.13
 - Git
-- Ollama for local model inference (not required until Ollama planning is implemented)
+- Ollama and a local model for LLM planning; recognized objectives can still use rule-based fallback when Ollama is unavailable
 
 ## Install and configure
 
@@ -70,6 +70,12 @@ Every invocation has a durable attempt record. Bounded retries occur only for ex
 Approval is verified from persisted requests matching exact run, step (or plan scope), and digest. The request must be approved and resolved before an approved execution context is created; execution accepts no approval boolean. Process interruption is recorded as `PAUSED` with `error_code=interrupted`; uncertain attempts are never automatically replayed. Recovery records the interruption but does not resume work. A user cancellation during an uncertain tool call is also paused for review because synchronous Python cannot be forcibly stopped safely.
 
 Persisted tool results are limited to 256 KiB measured as compact JSON encoded in UTF-8. See [Installation and setup](docs/setup.md) for a minimal execution example.
+
+## Phase 4 local planning
+
+`PlanningService.plan(objective)` asks the configured Ollama model for a JSON-schema-constrained plan, then validates the plan structure, registered tool names, and each tool's Pydantic input contract. It returns an explicit `planner_kind` and model or fallback reason. It does not execute the plan. Call `PlanningService.create_run(result, execution_service)` to persist it, or `PlanningService.execute(...)` when execution is explicitly intended.
+
+When Ollama is unavailable or returns an invalid plan, the configurable fallback recognizes only explicit arithmetic expressions and ISO date arithmetic. Unsupported objectives return a typed error instead of claiming a plan was made. For example, `Calculate 6 * 7` produces a one-step plan selecting the registered `calculator` tool with `{"expression":"6 * 7"}`. Neither planner can supply code or select unregistered tools.
 
 ## Local-first and safety principles
 

@@ -5,7 +5,7 @@
 - Python 3.13
 - Git
 - Windows PowerShell on Windows; the package itself uses cross-platform Python APIs
-- Ollama and a locally available model for future inference features. Ollama is not required for the current domain, persistence, or test workflows.
+- Ollama and a locally available model for LLM-based planning. Rule-based planning remains available for a small set of recognized arithmetic and date objectives.
 
 ## Create a development environment
 
@@ -35,16 +35,23 @@ Copy `.env.example` to `.env`. Settings use the `AGENTFLOW_` prefix and are vali
 | Variable | Default | Purpose |
 |---|---|---|
 | `AGENTFLOW_OLLAMA_BASE_URL` | `http://localhost:11434` | Local Ollama base URL. Credentials in URLs are rejected. |
-| `AGENTFLOW_OLLAMA_MODEL` | `llama3.1` | Local model name configured for future planning. |
-| `AGENTFLOW_OLLAMA_TIMEOUT_SECONDS` | `60` | Positive request timeout, capped at 600 seconds. |
-| `AGENTFLOW_OLLAMA_FALLBACK_ENABLED` | `true` | Whether future planner orchestration may use rule-based fallback. |
+| `AGENTFLOW_OLLAMA_MODEL` | `llama3.1` | Local model name used for structured planning. |
+| `AGENTFLOW_OLLAMA_TIMEOUT_SECONDS` | `60` | Per-request timeout, capped at 600 seconds. |
+| `AGENTFLOW_OLLAMA_FALLBACK_ENABLED` | `true` | Use deterministic rules when Ollama is unavailable or its plan is invalid. Unsupported fallback objectives return an error. |
 | `AGENTFLOW_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`. |
 
 Do not commit `.env`, credentials, model data, or local databases. `.gitignore` excludes common local configuration and data files.
 
-## Prepare Ollama (when needed)
+## Install and prepare Ollama
 
-Install Ollama using its official distribution, start the local service, and download a model supported by your machine. Set the model name and local base URL in `.env`. AgentFlow does not connect to Ollama yet; planner integration and connection diagnostics are planned for later phases.
+Install Ollama using its official distribution, start the local service, then download a model supported by your machine. For example:
+
+```powershell
+ollama pull llama3.1
+ollama list
+```
+
+Set `AGENTFLOW_OLLAMA_BASE_URL` and `AGENTFLOW_OLLAMA_MODEL` in `.env` if you use a different local endpoint or model. AgentFlow calls Ollama's `/api/chat` endpoint with JSON-schema output constraints and the configured timeout. No cloud model API is used. The model is optional when rule-based fallback is enabled and the objective matches a supported rule.
 
 ## Run development checks
 
@@ -55,6 +62,22 @@ python -m ruff format --check .
 ```
 
 The test suite does not require a live Ollama service. The CI workflow installs the package and development extras on Windows and Ubuntu, then runs pytest and Ruff.
+
+## Plan a natural-language objective (Phase 4)
+
+```python
+from agentflow.planning import PlanningService
+from agentflow.tools.builtins import create_builtin_registry
+
+planner = PlanningService(create_builtin_registry())
+result = planner.plan("Calculate 6 * 7")
+print(result.planner_kind)  # ollama, or rule_based when fallback was used
+print(result.plan.model_dump(mode="json"))
+```
+
+The resulting plan contains a `calculator` step with `expression="6 * 7"`. If Ollama is offline or returns an invalid plan, the same objective can use the deterministic calculator rule; `fallback_reason` identifies why. Fallback only recognizes explicit arithmetic and ISO date difference/day-offset requests. It reports a typed error for other objectives.
+
+Planning alone does not create or execute a run. To explicitly persist a plan, call `planner.create_run(result, workflow_execution_service)`. To request execution, call `planner.execute(result, workflow_execution_service, workspace_roots=...)`.
 
 ## Execute a persisted workflow (Phase 3)
 
