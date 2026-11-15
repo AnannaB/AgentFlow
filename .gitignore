@@ -11,8 +11,15 @@ venv/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.cache/
+.tox/
+.nox/
 .coverage
 htmlcov/
+*.tmp
+*.temp
+*.bak
+*.log
 
 # Local configuration and data
 .env
@@ -21,8 +28,12 @@ htmlcov/
 *.db
 *.sqlite
 *.sqlite3
+*-wal
+*-shm
+*-journal
 data/
 logs/
+workspace/
 
 # Editors and operating systems
 .idea/

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+from pydantic import ValidationError
+
 from agentflow.domain.models import ExecutionPlan, PlanStep
 from agentflow.planning.errors import PlanValidationError
 from agentflow.tools.errors import ToolError
@@ -29,26 +31,52 @@ class PlanValidator:
                 plan = ExecutionPlan.model_validate_json(
                     json.dumps(value, ensure_ascii=False, allow_nan=False)
                 )
+        except ValidationError as error:
+            raise PlanValidationError(
+                _validation_message(error), **_plan_diagnostic(error)
+            ) from None
         except Exception as error:
-            raise PlanValidationError(_validation_message(error)) from None
+            raise PlanValidationError(
+                _validation_message(error), diagnostic_code="plan_schema_invalid"
+            ) from None
 
         normalized_steps: list[PlanStep] = []
-        for step in plan.steps:
+        for step_index, step in enumerate(plan.steps):
             try:
                 definition = self._registry.get(step.tool_name)
             except ToolError:
                 raise PlanValidationError(
-                    f"Step {step.step_key!r} selected an unregistered tool."
+                    "A plan step selected an unregistered tool.",
+                    diagnostic_code="unregistered_tool",
+                    step_index=step_index,
+                    field_path=f"steps[{step_index}].tool_name",
                 ) from None
             try:
                 encoded_arguments = json.dumps(
                     step.arguments, ensure_ascii=False, allow_nan=False, separators=(",", ":")
                 )
                 definition.input_model.model_validate_json(encoded_arguments)
-            except Exception as error:
+            except ValidationError as error:
                 raise PlanValidationError(
                     f"Arguments for step {step.step_key!r} do not match the "
-                    f"'{step.tool_name}' input schema: {_validation_message(error)}"
+                    f"'{step.tool_name}' input schema: {_validation_message(error)}",
+                    diagnostic_code="tool_input_schema_invalid",
+                    step_index=step_index,
+                    tool_name=definition.metadata.name,
+                    field_path=_safe_field_path(
+                        error.errors(include_input=False, include_url=False)[0].get("loc", ()),
+                        allowed_fields=set(definition.input_model.model_fields),
+                        prefix=f"steps[{step_index}].arguments",
+                    ),
+                ) from None
+            except Exception:
+                raise PlanValidationError(
+                    f"Arguments for step {step.step_key!r} do not match the "
+                    f"'{step.tool_name}' input schema.",
+                    diagnostic_code="tool_input_schema_invalid",
+                    step_index=step_index,
+                    tool_name=definition.metadata.name,
+                    field_path=f"steps[{step_index}].arguments",
                 ) from None
 
             tool_risk = definition.metadata.risk.value
@@ -77,3 +105,83 @@ def _validation_message(error: Exception) -> str:
         if concise:
             return "; ".join(concise)
     return "The response was not valid plan JSON."
+
+
+def _plan_diagnostic(error: ValidationError) -> dict[str, object]:
+    """Build a safe diagnostic without copying model-provided values into logs."""
+    issues = error.errors(include_input=False, include_url=False)
+    if not issues:
+        return {"diagnostic_code": "plan_schema_invalid", "field_path": "plan"}
+
+    issue = issues[0]
+    location = issue.get("loc", ())
+    error_type = issue.get("type")
+    code = "malformed_plan_json" if error_type == "json_invalid" else "plan_schema_invalid"
+    field_path = _safe_field_path(
+        location,
+        allowed_fields={
+            "objective_summary",
+            "steps",
+            "step_key",
+            "tool_name",
+            "purpose",
+            "arguments",
+            "depends_on",
+            "required",
+            "risk_level",
+            "completion_criteria",
+            "requires_approval",
+        },
+        prefix="plan",
+    )
+    step_index = _step_index(location)
+
+    if error_type == "value_error":
+        detail = str(issue.get("ctx", {}).get("error", ""))
+        if "unknown dependencies" in detail:
+            code, field_path = "unknown_dependency", "steps.depends_on"
+        elif "cannot depend on itself" in detail:
+            code, field_path = "self_dependency", "steps.depends_on"
+        elif "duplicate dependencies" in detail:
+            code, field_path = "duplicate_dependency", "steps.depends_on"
+        elif "must not contain a cycle" in detail:
+            code, field_path = "dependency_cycle", "steps.depends_on"
+        elif "step_key values must be unique" in detail:
+            code, field_path = "duplicate_step_key", "steps.step_key"
+
+    return {
+        "diagnostic_code": code,
+        "step_index": step_index,
+        "field_path": field_path,
+    }
+
+
+def _step_index(location: object) -> int | None:
+    if not isinstance(location, (tuple, list)):
+        return None
+    try:
+        steps_position = location.index("steps")
+    except ValueError:
+        return None
+    if steps_position + 1 >= len(location):
+        return None
+    index = location[steps_position + 1]
+    return index if type(index) is int and 0 <= index < 100 else None
+
+
+def _safe_field_path(
+    location: object,
+    *,
+    allowed_fields: set[str],
+    prefix: str,
+) -> str:
+    if not isinstance(location, (tuple, list)):
+        return prefix
+    safe_parts: list[str] = [prefix]
+    for segment in location:
+        if isinstance(segment, str) and segment in allowed_fields:
+            safe_parts.append(segment)
+        elif type(segment) is int and 0 <= segment < 100:
+            if safe_parts[-1] == "steps":
+                safe_parts[-1] = f"steps[{segment}]"
+    return ".".join(safe_parts)

@@ -10,7 +10,12 @@ from agentflow.application.models import ExecutionResult
 from agentflow.config import Settings, get_settings
 from agentflow.domain.models import WorkflowRun
 from agentflow.domain.states import PlannerKind
-from agentflow.planning.errors import OllamaConnectionError, PlanningError, PlanValidationError
+from agentflow.planning.errors import (
+    OllamaConnectionError,
+    OllamaResponseError,
+    PlanningError,
+    PlanValidationError,
+)
 from agentflow.planning.fallback import RuleBasedPlanner
 from agentflow.planning.models import PlanningResult
 from agentflow.planning.ollama import OllamaClient
@@ -61,7 +66,17 @@ class PlanningService:
             if not self._settings.ollama_fallback_enabled:
                 raise
             reason = _fallback_code(error)
-            logger.warning("Using rule-based planning fallback: reason=%s", reason)
+            logger.warning(
+                "Using rule-based planning fallback: reason=%s diagnostic_code=%s "
+                "step_index=%s tool_name=%s field_path=%s os_error_code=%s http_status=%s",
+                reason,
+                _diagnostic_code(error),
+                error.step_index if isinstance(error, PlanValidationError) else None,
+                error.tool_name if isinstance(error, PlanValidationError) else None,
+                error.field_path if isinstance(error, PlanValidationError) else None,
+                error.os_error_code if isinstance(error, OllamaConnectionError) else None,
+                error.http_status if isinstance(error, OllamaConnectionError) else None,
+            )
             fallback_plan = self._validator.validate(self._fallback.plan(objective))
             return PlanningResult(
                 objective=objective,
@@ -100,3 +115,11 @@ def _fallback_code(error: PlanningError) -> str:
     if isinstance(error, PlanValidationError):
         return "invalid_ollama_plan"
     return "ollama_invalid_response"
+
+
+def _diagnostic_code(error: PlanningError) -> str:
+    if isinstance(error, (PlanValidationError, OllamaResponseError)):
+        return error.diagnostic_code
+    if isinstance(error, OllamaConnectionError):
+        return error.diagnostic_code
+    return "planning_error"

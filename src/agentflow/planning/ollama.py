@@ -76,7 +76,10 @@ class OllamaClient:
         }
         body = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
         if len(body) > MAX_OLLAMA_BODY_BYTES:
-            raise OllamaResponseError("Registered tool catalog exceeds the planning request limit")
+            raise OllamaResponseError(
+                "Registered tool catalog exceeds the planning request limit",
+                diagnostic_code="planning_request_too_large",
+            )
         request = Request(
             f"{self._settings.ollama_base_url}/api/chat",
             data=body,
@@ -87,25 +90,63 @@ class OllamaClient:
             with self._opener(request, timeout=self._settings.ollama_timeout_seconds) as response:
                 response_body = response.read(MAX_OLLAMA_BODY_BYTES + 1)
         except TimeoutError as error:
-            raise OllamaConnectionError("Ollama request timed out") from error
+            raise OllamaConnectionError(
+                "Ollama request timed out", diagnostic_code="ollama_timeout"
+            ) from error
         except HTTPError as error:
             error.close()
-            raise OllamaConnectionError(f"Ollama returned HTTP status {error.code}") from None
-        except (URLError, OSError) as error:
-            if isinstance(getattr(error, "reason", None), TimeoutError):
-                raise OllamaConnectionError("Ollama request timed out") from None
+            diagnostic_code = "ollama_model_not_found" if error.code == 404 else "ollama_http_error"
+            message = (
+                "Ollama could not find the configured model"
+                if error.code == 404
+                else f"Ollama returned HTTP status {error.code}"
+            )
             raise OllamaConnectionError(
-                "Could not connect to the configured Ollama service"
+                message,
+                diagnostic_code=diagnostic_code,
+                http_status=error.code,
+            ) from None
+        except (URLError, OSError) as error:
+            reason = getattr(error, "reason", error)
+            if isinstance(reason, TimeoutError):
+                raise OllamaConnectionError(
+                    "Ollama request timed out", diagnostic_code="ollama_timeout"
+                ) from None
+            os_error_code = getattr(reason, "winerror", None) or getattr(reason, "errno", None)
+            if os_error_code in {10013, 13}:
+                diagnostic_code = "local_socket_access_denied"
+            elif os_error_code in {10061, 111}:
+                diagnostic_code = "ollama_connection_refused"
+            elif isinstance(reason, OSError) and getattr(reason, "errno", None) in {
+                -2,
+                11001,
+            }:
+                diagnostic_code = "ollama_host_resolution_failed"
+            else:
+                diagnostic_code = "ollama_network_error"
+            raise OllamaConnectionError(
+                "Could not connect to the configured Ollama service",
+                diagnostic_code=diagnostic_code,
+                os_error_code=os_error_code if type(os_error_code) is int else None,
             ) from None
 
         if len(response_body) > MAX_OLLAMA_BODY_BYTES:
-            raise OllamaResponseError("Ollama response exceeds the 1 MiB limit")
+            raise OllamaResponseError(
+                "Ollama response exceeds the 1 MiB limit",
+                diagnostic_code="ollama_response_too_large",
+            )
 
         try:
             envelope = json.loads(response_body)
             content = envelope["message"]["content"]
         except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as error:
-            raise OllamaResponseError("Ollama returned a malformed chat response") from error
+            raise OllamaResponseError(
+                "Ollama returned a malformed chat response",
+                diagnostic_code="malformed_chat_envelope",
+            ) from error
         if not isinstance(content, str) or not content.strip():
-            raise OllamaResponseError("Ollama returned an empty plan response")
+            raise OllamaResponseError(
+                "Ollama returned an empty plan response",
+                diagnostic_code="empty_plan_content",
+            )
         return content

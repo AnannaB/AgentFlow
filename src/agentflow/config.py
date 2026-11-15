@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     )
 
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.1"
+    ollama_model: str = "llama3.2:1b"
     ollama_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
     ollama_fallback_enabled: bool = True
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"

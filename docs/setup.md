@@ -35,7 +35,7 @@ Copy `.env.example` to `.env`. Settings use the `AGENTFLOW_` prefix and are vali
 | Variable | Default | Purpose |
 |---|---|---|
 | `AGENTFLOW_OLLAMA_BASE_URL` | `http://localhost:11434` | Local Ollama base URL. Credentials in URLs are rejected. |
-| `AGENTFLOW_OLLAMA_MODEL` | `llama3.1` | Local model name used for structured planning. |
+| `AGENTFLOW_OLLAMA_MODEL` | `llama3.2:1b` | Local model name used for structured planning. |
 | `AGENTFLOW_OLLAMA_TIMEOUT_SECONDS` | `60` | Per-request timeout, capped at 600 seconds. |
 | `AGENTFLOW_OLLAMA_FALLBACK_ENABLED` | `true` | Use deterministic rules when Ollama is unavailable or its plan is invalid. Unsupported fallback objectives return an error. |
 | `AGENTFLOW_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`. |
@@ -49,7 +49,7 @@ Do not commit `.env`, credentials, model data, or local databases. `.gitignore` 
 Install Ollama using its official distribution, start the local service, then download a model supported by your machine. For example:
 
 ```powershell
-ollama pull llama3.1
+ollama pull llama3.2:1b
 ollama list
 ```
 
@@ -74,6 +74,10 @@ python -m streamlit run src/agentflow/dashboard/app.py
 ```
 
 The dashboard opens on the local Streamlit address. It initializes the SQLite database, creates the configured workspace when needed, and keeps changed model/workspace settings in the current browser session. Uploaded CSV files are limited to 10 MiB, 100,000 rows, and 256 columns. Review the generated plan, save it as a workflow, then use the separate **Run workflow** action. Do not expose this local operator interface to an untrusted network; approval actions use the backend's scope checks but this phase does not add user authentication.
+
+### Deterministic sales demonstration
+
+Upload `examples/sales_demo.csv` on **New workflow**, then choose **Use deterministic sales demo plan**. AgentFlow makes a separate workspace copy with derived `revenue` and calendar `month` columns, validates a plan using the registered CSV profiler and aggregators, and shows that plan for review. The source upload is preserved. Continue with **Save reviewed plan as workflow** and **Run workflow**. Results show the product and monthly totals and highlight the highest-revenue product. Use **Reports** to export Markdown; JSON export requires an approval decision on **Approvals** first. This demo is identified as deterministic rule-based planning and makes no Ollama request.
 
 ## Plan a natural-language objective (Phase 4)
 

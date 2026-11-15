@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -151,6 +151,35 @@ def test_ollama_client_maps_connection_and_timeout_errors(settings):
         OllamaClient(settings, opener=timed_out).generate_plan("objective", ())
 
 
+def test_ollama_client_classifies_local_socket_permission_error(settings, caplog):
+    def denied(*args, **kwargs):
+        raise URLError(OSError(10013, "socket access denied"))
+
+    service = PlanningService(_registry(), settings, client=OllamaClient(settings, opener=denied))
+
+    result = service.plan("Calculate 6 * 7")
+
+    assert result.fallback_reason == "ollama_unavailable"
+    assert "diagnostic_code=local_socket_access_denied" in caplog.text
+    assert "os_error_code=10013" in caplog.text
+    assert "socket access denied" not in caplog.text
+
+
+def test_ollama_client_classifies_model_not_found_response(settings, caplog):
+    def model_missing(*args, **kwargs):
+        raise HTTPError("http://localhost:11434/api/chat", 404, "not found", {}, None)
+
+    service = PlanningService(
+        _registry(), settings, client=OllamaClient(settings, opener=model_missing)
+    )
+
+    result = service.plan("Calculate 6 * 7")
+
+    assert result.fallback_reason == "ollama_unavailable"
+    assert "diagnostic_code=ollama_model_not_found" in caplog.text
+    assert "http_status=404" in caplog.text
+
+
 @pytest.mark.parametrize(
     "body",
     [b"not json", b"{}", b'{"message":{"content":""}}'],
@@ -248,21 +277,90 @@ def test_planning_service_returns_ollama_provenance_without_executing(settings):
 
 
 @pytest.mark.parametrize(
-    ("response", "expected_reason"),
+    ("response", "diagnostic_code", "field_path", "tool_name"),
     [
-        ("not json", "invalid_ollama_plan"),
-        (_plan_json(tool="not_registered"), "invalid_ollama_plan"),
+        ("password=diagnostic-secret", "malformed_plan_json", "plan", None),
+        (
+            json.dumps({"objective_summary": "A plan", "steps": [{"step_key": "step"}]}),
+            "plan_schema_invalid",
+            "plan.steps[0].tool_name",
+            None,
+        ),
+        (
+            _plan_json(tool="unregistered_tool"),
+            "unregistered_tool",
+            "steps[0].tool_name",
+            None,
+        ),
+        (
+            _plan_json(arguments={"value": 42, "api_token": "diagnostic-secret"}),
+            "tool_input_schema_invalid",
+            "steps[0].arguments.value",
+            "echo_text",
+        ),
+        (
+            json.dumps(
+                {
+                    **json.loads(_plan_json()),
+                    "steps": [
+                        {
+                            **json.loads(_plan_json())["steps"][0],
+                            "depends_on": ["password=diagnostic-secret"],
+                        }
+                    ],
+                }
+            ),
+            "unknown_dependency",
+            "steps.depends_on",
+            None,
+        ),
     ],
 )
-def test_invalid_ollama_plan_uses_explicit_rule_fallback(settings, response, expected_reason):
+def test_invalid_ollama_plan_logs_safe_validation_diagnostic(
+    settings, caplog, response, diagnostic_code, field_path, tool_name
+):
     service = PlanningService(_registry(), settings, client=StubClient(response=response))
 
     result = service.plan("Calculate 6 * 7")
 
     assert result.planner_kind == PlannerKind.RULE_BASED
-    assert result.fallback_reason == expected_reason
+    assert result.fallback_reason == "invalid_ollama_plan"
     assert result.plan.steps[0].tool_name == "calculator"
     assert result.plan.steps[0].arguments == {"expression": "6 * 7"}
+    assert f"diagnostic_code={diagnostic_code}" in caplog.text
+    assert f"field_path={field_path}" in caplog.text
+    assert f"tool_name={tool_name}" in caplog.text
+    assert "diagnostic-secret" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("body", "diagnostic_code"),
+    [
+        (b"password=diagnostic-secret", "malformed_chat_envelope"),
+        (
+            json.dumps({"message": {"content": "password=diagnostic-secret"}}).encode(),
+            "malformed_plan_json",
+        ),
+    ],
+)
+def test_ollama_failure_log_distinguishes_api_envelope_from_plan_json(
+    settings, caplog, body, diagnostic_code
+):
+    client = OllamaClient(
+        settings,
+        opener=lambda *args, **kwargs: FakeHTTPResponse(body),
+    )
+    result = PlanningService(_registry(), settings, client=client).plan("Calculate 6 * 7")
+
+    assert result.planner_kind == PlannerKind.RULE_BASED
+    expected_reason = (
+        "ollama_invalid_response"
+        if diagnostic_code == "malformed_chat_envelope"
+        else "invalid_ollama_plan"
+    )
+    assert result.fallback_reason == expected_reason
+    assert f"diagnostic_code={diagnostic_code}" in caplog.text
+    assert "diagnostic-secret" not in caplog.text
 
 
 def test_connection_failure_uses_fallback_and_discloses_reason(settings, caplog):

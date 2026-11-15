@@ -26,6 +26,11 @@ from agentflow.dashboard.controllers import (
     generate_plan,
 )
 from agentflow.dashboard.diagnostics import OllamaDiagnosticError, list_local_models
+from agentflow.dashboard.sales_demo import (
+    SalesDemoError,
+    create_sales_demo_plan,
+    supports_sales_demo,
+)
 from agentflow.dashboard.services import DashboardServices
 from agentflow.dashboard.uploads import (
     UploadedDataset,
@@ -170,6 +175,31 @@ def render_new_workflow(services: DashboardServices, settings: Settings) -> None
                 st.session_state.pop("agentflow_created_run_id", None)
                 st.session_state.pop("agentflow_execution_result", None)
                 st.success("Validated plan is ready for review. No workflow has been executed.")
+
+    if dataset is not None and supports_sales_demo(dataset):
+        if st.button("Use deterministic sales demo plan"):
+            try:
+                result, prepared = create_sales_demo_plan(
+                    dataset, str(services.workspace), services.registry
+                )
+            except SalesDemoError as error:
+                st.error(str(error))
+            except Exception:
+                st.error("The deterministic sales demo plan could not be prepared.")
+            else:
+                dataset = prepared
+                st.session_state["agentflow_dataset"] = prepared
+                st.session_state["agentflow_plan"] = result
+                st.session_state.pop("agentflow_created_run_id", None)
+                st.session_state.pop("agentflow_execution_result", None)
+                st.success(
+                    "Validated deterministic demo plan is ready for review. "
+                    "No Ollama request was made."
+                )
+                st.info(
+                    "The original upload is preserved. Registered CSV tools will use a "
+                    "workspace copy with calculated revenue and calendar month columns."
+                )
 
     result = st.session_state.get("agentflow_plan")
     if result is None:
@@ -600,6 +630,7 @@ def _execute_with_feedback(services: DashboardServices, run_id: UUID) -> None:
                     st.caption(f"Tool: `{step.tool_name}` · duration: {step.duration_ms} ms")
                     if step.output is not None:
                         st.json(_redact_mapping(step.output))
+                        _show_best_product(step.step_key, step.tool_name, step.output)
                     if step.failure:
                         st.error(step.failure.message)
 
@@ -624,6 +655,7 @@ def _show_persisted_steps(services: DashboardServices, run_id: UUID) -> None:
                 with st.expander(f"Attempt {attempt.attempt_number} · {attempt.status.value}"):
                     if attempt.output and attempt.output.success:
                         st.json(_redact_mapping(attempt.output.data))
+                        _show_best_product(step.step_key, step.tool_name, attempt.output.data)
                     if attempt.error_summary:
                         st.error(_redact_text(attempt.error_summary))
                     if attempt.error_code:
@@ -638,6 +670,27 @@ def _run_label(run) -> str:
 def _status_badge(status: str) -> str:
     label = status.replace("_", " ").title()
     return f"<span class='af-badge af-{status}'>{label}</span>"
+
+
+def _show_best_product(step_key: str, tool_name: str, output: dict) -> None:
+    if step_key != "revenue_by_product" or tool_name != "data_aggregator":
+        return
+    rows = output.get("rows")
+    if not isinstance(rows, list):
+        return
+    candidates = [
+        row
+        for row in rows
+        if isinstance(row, dict)
+        and isinstance(row.get("product"), str)
+        and isinstance(row.get("revenue"), (int, float))
+    ]
+    if candidates:
+        best = max(candidates, key=lambda row: row["revenue"])
+        st.markdown("**Best-performing product**")
+        product_column, revenue_column = st.columns(2)
+        product_column.metric("Product", str(best["product"]))
+        revenue_column.metric("Revenue", f"{best['revenue']:,.2f}")
 
 
 def _redact_mapping(value: dict) -> dict:

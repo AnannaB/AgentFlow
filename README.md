@@ -1,20 +1,40 @@
 # AgentFlow
 
-AgentFlow is a local-first agentic workflow orchestration platform. Users will describe an objective in natural language; AgentFlow will plan and execute validated workflows using registered tools, with local Ollama inference and a rule-based fallback.
+AgentFlow is a local-first workflow application for turning natural-language objectives into reviewable plans, executing registered Python tools, and producing inspectable reports. It uses Ollama for local LLM planning and retains a deterministic planner for a small set of supported objectives. The dashboard keeps planning, review, saving, and execution as separate user actions.
 
-> **Current status:** Phases 0–6 are implemented: foundation, domain and SQLite persistence, secure tool registry, workflow execution, local Ollama planning, approval/report services, and the Streamlit dashboard.
+## Features
 
-## Requirements
+- Local Ollama planning with JSON-schema-constrained output and strict validation.
+- Deterministic, explicitly attributed fallback planning.
+- Registered tools with Pydantic input/output contracts, risk controls, timeouts, and bounded retries.
+- CSV profiling, missing-value analysis, duplicate and outlier detection, and group aggregations.
+- Persisted workflow runs, attempts, approvals, and events in SQLite with explicit migrations.
+- Streamlit pages for overview, upload and plan review, execution history, approvals, reports, and settings.
+- Workspace-confined Markdown and approved JSON report exports.
+- A deterministic sales demonstration that remains usable when local Ollama planning is unavailable.
 
-- Python 3.13
-- Git
-- Ollama and a local model for LLM planning; recognized objectives can still use rule-based fallback when Ollama is unavailable
+## Architecture
 
-## Install and configure
+The project follows a modular application structure:
 
-See [Installation and setup](docs/setup.md) for Windows and general development setup, environment configuration, and Ollama preparation.
+| Area | Responsibility |
+|---|---|
+| `domain` | Strict workflow, plan, attempt, and state models |
+| `storage` | SQLite schema migrations and repository persistence |
+| `tools` | Registered built-ins, validation, policy, and workspace controls |
+| `application` | Workflow execution, approvals, and reporting services |
+| `planning` | Ollama client, tool-aware validation, and deterministic fallback |
+| `dashboard` | Streamlit views and wiring to application services |
 
-Quick start from the repository root:
+The model returns structured data only. AgentFlow validates the plan against the registered tool catalog and each tool's input schema before a run can be saved. It never executes generated Python, shell, or SQL. See [the architecture guide](docs/architecture.md) for lifecycle, persistence, and security details.
+
+## Technology
+
+Python 3.13, Ollama, Pydantic, SQLite, Streamlit, Pandas, NumPy, Plotly, pytest, Ruff, and GitHub Actions. Docker remains an intended deployment option, but this repository does not currently include a Dockerfile or Compose configuration. Inference runs through a local Ollama service; no paid cloud model API is integrated.
+
+## Installation
+
+On Windows PowerShell, from the repository root:
 
 ```powershell
 py -3.13 -m venv .venv
@@ -22,76 +42,64 @@ py -3.13 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
+```
+
+If environment activation is restricted, use `.\.venv\Scripts\python.exe -m pip install -e ".[dev]"` and run commands with that interpreter. See [setup documentation](docs/setup.md) for other platforms, configuration, and checks.
+
+## Ollama setup
+
+Install and start Ollama, then pull the default local model:
+
+```powershell
+ollama pull llama3.2:1b
+ollama list
+```
+
+The default endpoint is `http://localhost:11434` and the default model is `llama3.2:1b`. Override them with `AGENTFLOW_OLLAMA_BASE_URL` and `AGENTFLOW_OLLAMA_MODEL` in `.env`, or use the dashboard Settings page. The dashboard's connection check calls `/api/tags`; planning calls `POST /api/chat`, so a successful tags check alone does not verify planning access or the configured model. A live `/api/chat` request was not verified in the current development environment because Python received Windows socket error 10013. AgentFlow does not send prompts to a cloud provider.
+
+## Launch the dashboard
+
+```powershell
 python -m streamlit run src/agentflow/dashboard/app.py
 ```
 
-The dashboard starts locally and provides workflow planning, execution, approvals, reporting, and Ollama settings. Planning and execution are separate actions.
+The local dashboard provides an overview, workflow planning, run history, approval management, and report exports. Data and generated reports remain under the configured workspace, which defaults to `workspace`.
 
-## Development checks
+## Run the sales demonstration
+
+1. Launch the dashboard and open **New workflow**.
+2. Upload [`examples/sales_demo.csv`](examples/sales_demo.csv).
+3. Choose **Use deterministic sales demo plan**. This creates a validated plan using the registered CSV profiler and aggregator. It does not call Ollama or claim LLM provenance.
+4. Review the plan and its registered tools, then choose **Save reviewed plan as workflow**.
+5. Choose **Run workflow**. The profiler and aggregations calculate revenue by product and calendar month. Results identify the top product from the observed product totals.
+6. Open **Reports** and export Markdown. For JSON, request approval, approve the request on **Approvals**, then return to **Reports** to export.
+
+The demo preserves the uploaded source. Since the sample contains date, product, quantity, and unit price but no precomputed revenue or month fields, the deterministic demo prepares a separate workspace copy with those derived columns before the registered analysis tools run. Uploaded files are limited to 10 MiB, 100,000 rows, and 256 columns.
+
+For ordinary planning, enter an objective and choose **Generate plan**. Ollama results are labeled as Ollama plans; fallback provenance is displayed when fallback is used. The general rule-based fallback currently recognizes arithmetic and ISO date calculations only.
+
+## Screenshots
+
+Screenshots are not included yet. Add current dashboard captures here after reviewing them for local paths, run identifiers, and dataset information that should not be published.
+
+## Verification
 
 ```powershell
 python -m pytest
 python -m ruff check .
 python -m ruff format --check .
+git diff --check
 ```
 
-## Architecture and roadmap
+Latest local verification: **160 passed, 2 skipped**. The live Ollama endpoint diagnostic is opt-in; the Windows symlink security test was skipped because symlink creation was unavailable. Ruff lint passed and all 72 Python files were already formatted. Live Ollama planning and browser click-through were not verified.
 
-See [Architecture](docs/architecture.md) for component boundaries, data flow, persistence, execution behavior, security controls, and phased delivery.
+The regular test suite does not require a running Ollama server. To opt in to a local `/api/tags` diagnostic, set `$env:AGENTFLOW_DIAGNOSE_OLLAMA='1'` before running `python -m pytest tests/planning/test_ollama_endpoint.py -q`.
 
-Initialize the Phase 1 database and create a first run from Python:
+## Known limitations
 
-```python
-from agentflow.domain.models import WorkflowRun
-from agentflow.storage.sqlite import SQLiteDatabase, SQLiteRepository
-
-database = SQLiteDatabase("data/agentflow.sqlite3")
-database.initialize()
-repository = SQLiteRepository(database)
-run = repository.create_run(WorkflowRun(objective="Review a local report"))
-print(run.id)
-```
-
-Repository operations use short-lived connections. Use `with repository.transaction():` to group multiple repository writes atomically.
-
-## Phase 2 tool registry
-
-Tools are explicitly registered Python callables with a unique name and semantic version, description, strict Pydantic input and output models, risk, timeout, retry, and idempotency metadata. `ToolRegistry.invoke()` validates inputs, enforces approval and bounded concurrency, invokes only the registered callable, then validates and bounds JSON output. Discovery exposes schemas and metadata, never the callable. No model-generated Python, shell, SQL, or other code is executed.
-
-Create a registry with `create_builtin_registry()` from `agentflow.tools.builtins`. Provide `ToolExecutionContext` with explicitly configured existing workspace roots for file tools. JSON export also requires `approved=True`; future workflow services must provide an actual verified approval decision.
-
-Built-ins: `calculator` supports bounded basic arithmetic; `date_difference` and `date_calculate` provide date arithmetic; `csv_profiler` reports dataset shape, columns, missing values, types, and basic statistics; `missing_value_analyzer` reports null counts and percentages; `duplicate_detector` detects repeated rows or selected columns; `outlier_detector` uses configurable IQR bounds; `data_aggregator` groups and computes sum, mean, count, min, or max; `json_exporter` writes validated JSON atomically within an approved workspace; `markdown_report_generator` builds an escaped readable report.
-
-Tool execution timeouts bound caller wait time and signal cooperative cancellation. Python cannot forcibly stop an already-running synchronous function, so registered implementations must be trusted, bounded, and call context checkpoints around longer work. File tools have explicit size limits and do not log their payloads.
-
-## Phase 3 workflow execution
-
-`WorkflowExecutionService` persists a validated execution plan and pinned tool versions with `create_run()`, then runs it with `execute(run_id)`. Steps are scheduled sequentially in plan order after their direct dependencies succeed. Inputs may contain only the exact `{"$agentflow_ref":{"step_key":"...","pointer":"/..."}}` marker using RFC 6901 JSON Pointer; references are limited to successful direct dependencies in the same run.
-
-Every invocation has a durable attempt record. Bounded retries occur only for explicitly retryable, idempotent tools that raise classified `ToolBusyError` or `ToolTransientError`. Validation, permission, timeout, and uncertain outcomes are not retried. Optional failures remain in history and do not alone fail a run; dependants of any unsuccessful step are skipped, while independent steps continue.
-
-Approval is verified from persisted requests matching exact run, step (or plan scope), and digest. The request must be approved and resolved before an approved execution context is created; execution accepts no approval boolean. Process interruption is recorded as `PAUSED` with `error_code=interrupted`; uncertain attempts are never automatically replayed. Recovery records the interruption but does not resume work. A user cancellation during an uncertain tool call is also paused for review because synchronous Python cannot be forcibly stopped safely.
-
-Persisted tool results are limited to 256 KiB measured as compact JSON encoded in UTF-8. See [Installation and setup](docs/setup.md) for a minimal execution example.
-
-## Phase 4 local planning
-
-`PlanningService.plan(objective)` asks the configured Ollama model for a JSON-schema-constrained plan, then validates the plan structure, registered tool names, and each tool's Pydantic input contract. It returns an explicit `planner_kind` and model or fallback reason. It does not execute the plan. Call `PlanningService.create_run(result, execution_service)` to persist it, or `PlanningService.execute(...)` when execution is explicitly intended.
-
-When Ollama is unavailable or returns an invalid plan, the configurable fallback recognizes only explicit arithmetic expressions and ISO date arithmetic. Unsupported objectives return a typed error instead of claiming a plan was made. For example, `Calculate 6 * 7` produces a one-step plan selecting the registered `calculator` tool with `{"expression":"6 * 7"}`. Neither planner can supply code or select unregistered tools.
-
-## Phase 5 approvals and reports
-
-Use `ApprovalService.list_pending()` to review requests, then approve or reject with the request's exact run ID, step ID, and digest. `WorkflowReportService.build_report(run_id)` creates a bounded report with planner provenance, timing, step attempts, outcomes, and redacted outputs. Markdown exports use the registered generator and write only within configured workspace roots. JSON report exports require a persisted `report_export` approval bound to the report content and destination before the registered JSON exporter can run.
-
-## Phase 6 dashboard
-
-Launch with `python -m streamlit run src/agentflow/dashboard/app.py`. The default local database is `data/agentflow.sqlite3` and uploads/reports use the `workspace` directory; override them with `AGENTFLOW_DATABASE_PATH` and `AGENTFLOW_WORKSPACE_PATH`. The dashboard is intended for local operator use.
-
-## Local-first and safety principles
-
-- Inference is intended to run through a local Ollama instance; no paid cloud LLM API is part of the design.
-- Model output is untrusted data and must never be executed as code.
-- Workflow execution will be limited to registered tools with validated inputs and explicit approval policies.
-- Credentials and sensitive values must not be committed or written to logs.
-
+- Live Ollama planning depends on local process networking and the selected installed model; this session could not verify `/api/chat` because the Python process received Windows error 10013.
+- Browser click-through was not verified; the deterministic backend workflow and report exports were exercised through the application services.
+- The general deterministic fallback is intentionally narrow and does not plan arbitrary CSV analyses. Use the dedicated deterministic sales demo for the supplied sales dataset.
+- JSON report export requires an approval decision. The dashboard is intended for a trusted local operator and does not provide user authentication.
+- Python cannot forcibly stop an already-running synchronous tool call; timeout cancellation is cooperative and uncertain side effects are not automatically replayed.
+- Docker packaging is not included yet; run AgentFlow directly from the Python environment.
